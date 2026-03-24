@@ -117,6 +117,9 @@ OPENROUTER_AGENT_SYSTEM_SUFFIX = (
     "you CAN do it by reading then search_replace or write_file. Typical paths: builder_server.py, static/builder.html, "
     "static/beehaive.css, static/beehaive-i18n.js. Do not edit builder_config.json unless explicitly asked (may contain secrets). "
     "After changing builder_server.py, tell the user to restart the Flask/Builder process so changes load.\n"
+    "BREVITY / NO BOILERPLATE: Do not waste tokens on generic scaffolding, repeated class skeletons, or filler lines like "
+    "«each class can be extended with more methods» unless the user explicitly asked for stubs only. Prefer minimal concrete code, "
+    "one tool call when enough, and short summaries.\n"
     "After tools return, summarize what you changed and any user steps (restart, refresh) in plain language."
 )
 
@@ -287,12 +290,29 @@ def _execute_openrouter_agent_tool(name: str, raw_args: str, workspace_path: str
             ws = Path(workspace_path).resolve()
             if not ws.exists():
                 return json.dumps({"ok": False, "error": f"workspace_path not found: {ws}"})
-            proc = subprocess.run(cmd, cwd=str(ws), shell=True, capture_output=True, text=True, check=False)
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(ws),
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=120,
+                )
+            except subprocess.TimeoutExpired:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "Comando superó 120s (timeout). Usa un comando más corto o evita procesos interactivos.",
+                    },
+                    ensure_ascii=False,
+                )
             out = {
                 "ok": proc.returncode == 0,
                 "exit_code": proc.returncode,
-                "stdout": proc.stdout[-14000:],
-                "stderr": proc.stderr[-14000:],
+                "stdout": (proc.stdout or "")[-14000:],
+                "stderr": (proc.stderr or "")[-14000:],
             }
             return json.dumps(out, ensure_ascii=False)
 
@@ -435,7 +455,7 @@ def _groq_chat_completion_nonstream(messages: list, model: str | None = None) ->
     return r.json()
 
 
-def _openrouter_chat_completion_nonstream(payload: dict):
+def _openrouter_chat_completion_nonstream(payload: dict, timeout: float | int = 300):
     """POST chat/completions sin stream; devuelve dict JSON o lanza."""
     key = _openrouter_api_key()
     if not key:
@@ -447,7 +467,7 @@ def _openrouter_chat_completion_nonstream(payload: dict):
         "User-Agent": "Uncensored-Builder/1.0 (local; https://openrouter.ai)",
     }
     hdrs.update(_openrouter_extra_headers())
-    r = requests.post(url, headers=hdrs, json=payload, timeout=300)
+    r = requests.post(url, headers=hdrs, json=payload, timeout=timeout)
     if r.status_code >= 400:
         try:
             ej = r.json()
@@ -540,6 +560,66 @@ def _openrouter_max_tokens() -> int:
     except (TypeError, ValueError):
         n = 8192
     return max(64, min(32000, n))
+
+
+# Techo de caracteres por petición (≈ tokens×4) para no enviar historiales enormes a Groq/OpenRouter.
+_CLOUD_MSG_PER_MESSAGE_MAX = 48000
+_CLOUD_GROQ_HISTORY_MAX_CHARS = 22000
+_CLOUD_OPENROUTER_HISTORY_MAX_CHARS = 120000
+# Por petición al modo agente (varias vueltas modelo↔herramientas; evita bloqueos larguísimos).
+_OPENROUTER_AGENT_HTTP_TIMEOUT_SEC = 180
+
+
+def _truncate_chat_content(s: str, max_len: int) -> str:
+    if not isinstance(s, str) or len(s) <= max_len:
+        return s
+    return s[:max_len] + "\n\n[…contenido truncado por límite de contexto…]"
+
+
+def _clamp_chat_messages(messages: list, max_total_chars: int, per_message_max: int = _CLOUD_MSG_PER_MESSAGE_MAX) -> list:
+    """Conserva system + los últimos turnos hasta max_total_chars (defensa en servidor)."""
+    if not isinstance(messages, list) or not messages:
+        return messages
+    normalized: list = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        c = m.get("content")
+        if isinstance(c, str):
+            normalized.append({"role": role, "content": _truncate_chat_content(c, per_message_max)})
+        else:
+            normalized.append(dict(m))
+    if not normalized:
+        return messages
+    sys: list = []
+    rest = normalized
+    if normalized[0].get("role") == "system":
+        sys = [normalized[0]]
+        rest = normalized[1:]
+    sys_len = sum(len((m.get("content") or "")) for m in sys)
+    budget = max(0, max_total_chars - sys_len)
+    kept: list = []
+    used = 0
+    for m in reversed(rest):
+        c = m.get("content") or ""
+        clen = len(c) if isinstance(c, str) else 0
+        if used + clen > budget and kept:
+            break
+        kept.append(m)
+        used += clen
+    kept.reverse()
+    dropped = len(rest) > len(kept)
+    if not dropped:
+        return sys + kept
+    note = (
+        "[Historial recortado automáticamente para cumplir el límite de tokens de la API (Groq/OpenRouter). "
+        "Usa «Nueva conversación» si necesitas contexto limpio.]\n\n"
+    )
+    if sys and sys[0].get("role") == "system":
+        c0 = sys[0].get("content") or ""
+        return [{"role": "system", "content": note + c0}] + kept
+    return [{"role": "system", "content": note.strip()}] + kept
 
 
 def _openrouter_extra_headers():
@@ -834,7 +914,20 @@ def config():
     if data.get("clear_openrouter_key") is True:
         CONFIG["openrouter_api_key"] = ""
     if "github" in data and isinstance(data["github"], dict):
-        CONFIG["github"].update(data["github"])
+        incoming = data["github"]
+        ghc = CONFIG["github"]
+        for key in ("owner", "repo", "branch"):
+            if key in incoming:
+                v = (incoming.get(key) or "").strip()
+                if key == "branch" and not v:
+                    v = "main"
+                ghc[key] = v
+        if "token" in incoming:
+            t = (incoming.get("token") or "").strip()
+            if t and t != "***":
+                ghc["token"] = t
+        if incoming.get("clear_github_token") is True:
+            ghc["token"] = ""
     if "local_roots" in data and isinstance(data["local_roots"], list):
         CONFIG["local_roots"] = data["local_roots"]
     if "skill_dirs" in data and isinstance(data["skill_dirs"], list):
@@ -924,6 +1017,7 @@ def chat_groq_stream():
     raw_messages = data.get("messages")
     if not raw_messages or not isinstance(raw_messages, list):
         return jsonify({"error": "messages (array) required"}), 400
+    raw_messages = _clamp_chat_messages(raw_messages, _CLOUD_GROQ_HISTORY_MAX_CHARS)
     model = (data.get("model") or "").strip() or CONFIG.get("groq_model") or "llama-3.3-70b-versatile"
     key = _groq_api_key()
     if not key:
@@ -990,6 +1084,7 @@ def chat_openrouter_stream():
     raw_messages = data.get("messages")
     if not raw_messages or not isinstance(raw_messages, list):
         return jsonify({"error": "messages (array) required"}), 400
+    raw_messages = _clamp_chat_messages(raw_messages, _CLOUD_OPENROUTER_HISTORY_MAX_CHARS)
     model = (data.get("model") or "").strip() or CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5"
     key = _openrouter_api_key()
     if not key:
@@ -1071,6 +1166,7 @@ def chat_openrouter_agent():
     raw_messages = data.get("messages")
     if not raw_messages or not isinstance(raw_messages, list):
         return jsonify({"error": "messages (array) required"}), 400
+    raw_messages = _clamp_chat_messages(raw_messages, _CLOUD_OPENROUTER_HISTORY_MAX_CHARS)
     model = (data.get("model") or "").strip() or CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5"
     workspace_path = (data.get("workspace_path") or "").strip()
     if not _openrouter_api_key():
@@ -1105,7 +1201,9 @@ def chat_openrouter_agent():
                 "temperature": float(CONFIG.get("temperature", 0.7)),
                 "max_tokens": _openrouter_max_tokens(),
             }
-            resp = _openrouter_chat_completion_nonstream(payload)
+            resp = _openrouter_chat_completion_nonstream(
+                payload, timeout=_OPENROUTER_AGENT_HTTP_TIMEOUT_SEC
+            )
             choices = resp.get("choices") or []
             if not choices:
                 return jsonify({"error": "empty choices from OpenRouter", "steps": steps}), 502
@@ -1170,6 +1268,16 @@ def chat_openrouter_agent():
         ), 502
     except ValueError as e:
         return jsonify({"error": str(e), "steps": steps}), 400
+    except requests.exceptions.Timeout:
+        return jsonify(
+            {
+                "error": (
+                    f"Timeout esperando a OpenRouter ({_OPENROUTER_AGENT_HTTP_TIMEOUT_SEC}s). "
+                    "Prueba otro modelo, acorta el chat (Nueva conversación) o desactiva modo agente."
+                ),
+                "steps": steps,
+            }
+        ), 504
     except Exception as e:
         return jsonify({"error": str(e), "steps": steps}), 500
 
@@ -2011,9 +2119,19 @@ def get_job(job_id):
 def github_connect():
     data = request.json or {}
     gh = CONFIG["github"]
-    for key in ["token", "owner", "repo", "branch"]:
+    for key in ["owner", "repo", "branch"]:
         if key in data:
-            gh[key] = data[key]
+            v = (data.get(key) or "").strip()
+            if key == "branch" and not v:
+                v = "main"
+            gh[key] = v
+    # No sobrescribir token con cadena vacía (el GET enmascara "***" y el cliente suele reenviar vacío).
+    if "token" in data:
+        t = (data.get("token") or "").strip()
+        if t and t != "***":
+            gh["token"] = t
+    if data.get("clear_github_token") is True:
+        gh["token"] = ""
     save_config()
     return jsonify({"success": True})
 
@@ -2435,4 +2553,5 @@ if __name__ == "__main__":
         f"Ollama herramientas/swarm: {om} @ {CONFIG['ollama_base_url']}  ·  "
         f"Claude UI (solo Ollama): {base}/claude"
     )
-    app.run(host=CONFIG["host"], port=CONFIG["port"], debug=False)
+    # threaded: varias pestañas / health + petición larga (modo agente) sin bloquearse mutuamente.
+    app.run(host=CONFIG["host"], port=CONFIG["port"], debug=False, threaded=True)

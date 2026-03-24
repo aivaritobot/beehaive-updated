@@ -307,7 +307,7 @@
       <section id="view-github" class="view">
         <div class="panel">
           <h2 class="view-title">GitHub</h2>
-          <p class="view-sub">Token con acceso al repo. Carga árbol, preview de archivo e inclúyelo en el chat Puter.</p>
+          <p class="view-sub">Token con acceso al repo. «Guardar conexión» y también <strong>Settings → Guardar settings</strong> escriben owner/repo/rama en <span class="mono">builder_config.json</span> (el token no se borra si dejas el campo vacío).</p>
           <div class="grid2">
             <input id="gh-owner" class="input" placeholder="owner">
             <input id="gh-repo" class="input" placeholder="repo">
@@ -613,6 +613,55 @@
       const content = eng === 'openrouter' ? buildOpenRouterSystemPrompt() : buildPuterSystemPrompt();
       const rest = puterHistory.filter(m => m.role !== 'system');
       puterHistory = [{ role:'system', content }, ...rest];
+    }
+
+    /** Límite aprox. de caracteres de entrada para APIs en la nube (≈ tokens×4). Evita 100k+ tokens por historial largo. */
+    const CLOUD_MSG_PER_MESSAGE_MAX = 48000;
+    const CLOUD_GROQ_HISTORY_MAX_CHARS = 22000;
+    const CLOUD_OPENROUTER_HISTORY_MAX_CHARS = 120000;
+
+    function truncateCloudMessageContent(s, maxLen){
+      const t = String(s || '');
+      if(t.length <= maxLen) return t;
+      return t.slice(0, maxLen) + '\n\n[…contenido truncado por límite de contexto…]';
+    }
+
+    /**
+     * Copia recortada para Groq/OpenRouter: conserva system y los últimos turnos hasta caber en el techo.
+     * No muta el historial mostrado en la UI (solo el payload enviado al servidor).
+     */
+    function messagesPayloadForCloudApi(messages, maxTotalChars){
+      const perMax = CLOUD_MSG_PER_MESSAGE_MAX;
+      if(!messages || !messages.length) return [];
+      const normalized = messages.map(m => ({
+        role: m.role,
+        content: truncateCloudMessageContent(m.content, perMax)
+      }));
+      let sys = [];
+      let rest = normalized;
+      if(normalized[0]?.role === 'system'){
+        sys = [normalized[0]];
+        rest = normalized.slice(1);
+      }
+      const sysLen = sys.reduce((a, m) => a + (m.content || '').length, 0);
+      const budget = Math.max(0, maxTotalChars - sysLen);
+      const kept = [];
+      let used = 0;
+      for(let i = rest.length - 1; i >= 0; i--){
+        const m = rest[i];
+        const len = (m.content || '').length;
+        if(used + len > budget && kept.length) break;
+        kept.push(m);
+        used += len;
+      }
+      kept.reverse();
+      const dropped = rest.length > kept.length;
+      if(!dropped) return sys.concat(kept);
+      const note = '[Historial recortado automáticamente para cumplir el límite de tokens de la API (Groq/OpenRouter). Usa «Nueva conversación» si necesitas contexto limpio.]\n\n';
+      if(sys.length && sys[0].role === 'system'){
+        return [{ role:'system', content: note + (sys[0].content || '') }].concat(kept);
+      }
+      return [{ role:'system', content: note.trim() }].concat(kept);
     }
 
     function pushContext(label, text){
@@ -1419,6 +1468,16 @@
       if(gk) payload.groq_api_key = gk;
       const ork = document.getElementById('cfg-openrouter-key')?.value?.trim();
       if(ork) payload.openrouter_api_key = ork;
+      const go = document.getElementById('gh-owner')?.value?.trim() || '';
+      const gr = document.getElementById('gh-repo')?.value?.trim() || '';
+      const gb = document.getElementById('gh-branch')?.value?.trim() || 'main';
+      const gt = document.getElementById('gh-token')?.value?.trim() || '';
+      if(go && gr){
+        payload.github = { owner: go, repo: gr, branch: gb || 'main' };
+        if(gt) payload.github.token = gt;
+      } else if(gt){
+        payload.github = { token: gt };
+      }
       const saveRes = await fetch(api('/api/config'), {
         method:'PUT',
         headers:{'Content-Type':'application/json'},
@@ -1517,7 +1576,10 @@
         const r = await fetch(api('/api/chat/groq/stream'), {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ messages: puterHistory, model }),
+          body: JSON.stringify({
+            messages: messagesPayloadForCloudApi(puterHistory, CLOUD_GROQ_HISTORY_MAX_CHARS),
+            model
+          }),
           signal: chatAbortController ? chatAbortController.signal : undefined
         });
         if(!r.ok){
@@ -1583,7 +1645,10 @@
         const r = await fetch(api('/api/chat/openrouter/stream'), {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ messages: puterHistory, model }),
+          body: JSON.stringify({
+            messages: messagesPayloadForCloudApi(puterHistory, CLOUD_OPENROUTER_HISTORY_MAX_CHARS),
+            model
+          }),
           signal: chatAbortController ? chatAbortController.signal : undefined
         });
         if(!r.ok){
@@ -1661,14 +1726,27 @@
     async function sendMessageOpenRouterAgent(fullQuery, assistant){
       ensurePuterSystemMessage();
       puterHistory.push({ role:'user', content: fullQuery });
-      setAssistantMessageText(assistant, 'Ejecutando modo agente (herramientas en el servidor)…');
+      const t0 = Date.now();
+      let tick = null;
+      function agentStatusLine(){
+        const s = Math.floor((Date.now() - t0) / 1000);
+        return 'Modo agente (OpenRouter + herramientas)… ' + s + 's — suele tardar 30–120s; «Detener» cancela.';
+      }
+      setAssistantMessageText(assistant, agentStatusLine());
+      tick = setInterval(() => {
+        try{ setAssistantMessageText(assistant, agentStatusLine()); }catch(_){}
+      }, 1000);
       const model = (document.getElementById('openrouter-model')?.value || document.getElementById('cfg-openrouter-model')?.value || DEFAULT_OPENROUTER_MODEL).trim() || DEFAULT_OPENROUTER_MODEL;
       const workspace_path = document.getElementById('ws-path')?.value?.trim() || '';
       try{
         const r = await fetch(api('/api/chat/openrouter/agent'), {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ messages: puterHistory, model, workspace_path }),
+          body: JSON.stringify({
+            messages: messagesPayloadForCloudApi(puterHistory, CLOUD_OPENROUTER_HISTORY_MAX_CHARS),
+            model,
+            workspace_path
+          }),
           signal: chatAbortController ? chatAbortController.signal : undefined
         });
         let j = {};
@@ -1691,6 +1769,7 @@
           if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
         }
       } finally{
+        if(tick) clearInterval(tick);
         finishAssistantMessage(assistant);
       }
     }
@@ -1989,17 +2068,31 @@
     }
 
     async function saveGithub(){
-      await fetch('/api/github/connect', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          owner: document.getElementById('gh-owner').value.trim(),
-          repo: document.getElementById('gh-repo').value.trim(),
-          branch: document.getElementById('gh-branch').value.trim() || 'main',
-          token: document.getElementById('gh-token').value.trim()
-        })
-      });
-      document.getElementById('gh-output').textContent = 'GitHub config guardada.';
+      const out = document.getElementById('gh-output');
+      const owner = document.getElementById('gh-owner').value.trim();
+      const repo = document.getElementById('gh-repo').value.trim();
+      const branch = document.getElementById('gh-branch').value.trim() || 'main';
+      const token = document.getElementById('gh-token').value.trim();
+      const body = { owner, repo, branch };
+      if(token) body.token = token;
+      try{
+        const r = await fetch(api('/api/github/connect'), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok){
+          if(out) out.textContent = 'Error al guardar GitHub: ' + (j.error || r.status);
+          return;
+        }
+        if(out) out.textContent = 'GitHub guardado en builder_config.json (' + owner + '/' + repo + ', rama ' + branch + ').';
+        try{
+          localStorage.setItem('ub_github_repo_v1', JSON.stringify({ owner, repo, branch }));
+        }catch(_){}
+      }catch(e){
+        if(out) out.textContent = 'Red: ' + (e?.message || e);
+      }
     }
 
     async function checkGithub(){
