@@ -74,7 +74,24 @@
       </div>
       <hr style="border-color:var(--border);margin:12px 0">
       <div class="small" data-i18n="conv_list">Conversaciones</div>
-      <div id="conversations" class="side-list"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;align-items:center">
+        <select id="conv-project-filter" class="input" style="flex:1;min-width:120px;padding:6px;font-size:12px" title="Filtrar lista" onchange="loadConversations()">
+          <option value="__all__">Todos</option>
+          <option value="">(Sin proyecto)</option>
+        </select>
+        <button type="button" class="btn secondary small" onclick="promptNewProject()" title="Añadir nombre a la lista">+ Proyecto</button>
+      </div>
+      <div class="small" style="margin-bottom:4px">Guardar nuevos chats en</div>
+      <input id="conv-save-project" class="input mono" style="font-size:11px;padding:6px;margin-bottom:8px;width:100%" placeholder="Nombre de proyecto (vacío = sin proyecto)" title="Las conversaciones nuevas se etiquetan con este nombre">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center">
+        <select id="conv-archived-filter" class="input" style="flex:1;min-width:100px;padding:6px;font-size:12px" onchange="loadConversations()">
+          <option value="active">Activas</option>
+          <option value="archived">Archivadas</option>
+          <option value="all">Todas</option>
+        </select>
+        <button type="button" class="btn secondary small" onclick="loadConversationProjects();loadConversations()" title="Refrescar lista">↻</button>
+      </div>
+      <div id="conversations" class="side-list conv-list"></div>
     </aside>
 
     <main class="main">
@@ -186,7 +203,10 @@
           <div class="small" style="margin-bottom:6px" data-i18n="ctx_ready">Contexto para el próximo mensaje</div>
           <div id="context-chips" class="small" style="min-height:22px;margin-bottom:6px"></div>
           <button type="button" class="btn secondary small" onclick="clearContext()" data-i18n="clear_ctx">Limpiar contexto</button>
-          <div id="messages" class="msgs" style="margin-top:12px"></div>
+          <div class="msgs-wrap" style="position:relative;margin-top:12px">
+            <div id="messages" class="msgs"></div>
+            <button type="button" class="btn secondary small chat-scroll-bottom" onclick="scrollChatToBottom()" title="Ir al final de la conversación">↓ Final</button>
+          </div>
           <div class="chat-composer-block">
           <div class="small" style="margin-bottom:6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px"><span><span data-i18n="ws_path">Workspace</span>: <span class="mono" id="chat-ws-path-display">—</span></span><button type="button" class="btn secondary small" onclick="useBuilderInstallAsWorkspace()" title="Rellena el campo Workspace (pestaña inferior) con la carpeta de esta app, para git/pytest en el mismo repo">Usar carpeta del builder</button></div>
           <div class="small" style="margin-bottom:6px" data-i18n="term_quick">Terminal rápida</div>
@@ -206,8 +226,12 @@
         <aside class="panel chat-side-panel">
           <div class="small" data-i18n="upload_label">Subir archivo (uploads/)</div>
           <input type="file" id="uploader" class="input" onchange="uploadFile(event)">
-          <div id="files-mini" class="small" style="margin-top:10px"></div>
-          <button type="button" class="btn secondary small" style="margin-top:8px;width:100%" onclick="includeUploadInContext()" data-i18n="include_upload">Incluir último archivo en contexto</button>
+          <div id="files-mini" class="files-mini-list small" style="margin-top:10px"></div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+            <button type="button" class="btn secondary small" style="width:100%" onclick="includeUploadInContext()" data-i18n="include_upload">Incluir último subido en contexto</button>
+            <button type="button" class="btn secondary small" style="width:100%" onclick="includeSelectedUploadsInContext()">Incluir seleccionados en contexto</button>
+            <button type="button" class="btn secondary small" style="width:100%" onclick="deleteSelectedUploads()">Eliminar seleccionados</button>
+          </div>
           <button type="button" class="btn secondary small" style="margin-top:8px;width:100%" onclick="includeSkillsPackInContext()" data-i18n="include_skills">Incluir pack de skills</button>
         </aside>
       </section>
@@ -266,8 +290,12 @@
             <div id="browse-list" class="side-list" style="max-height:200px;margin-top:8px"></div>
           </div>
           <div class="panel">
-            <div class="small">Archivos subidos al servidor</div>
-            <div id="files-list"></div>
+            <div class="small">Archivos subidos al servidor (selección múltiple)</div>
+            <div id="files-list" class="files-mini-list"></div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+              <button type="button" class="btn secondary small" onclick="includeSelectedUploadsFromList('files-list')">Incluir seleccionados al chat</button>
+              <button type="button" class="btn secondary small" onclick="deleteSelectedUploadsFromList('files-list')">Eliminar seleccionados</button>
+            </div>
             <hr style="border-color:var(--border);margin:12px 0">
             <div class="small">Vista previa (local)</div>
             <pre id="local-preview-box" class="mono small" style="max-height:280px"></pre>
@@ -362,6 +390,7 @@
             <input id="cfg-openrouter-key" class="input" type="password" placeholder="OpenRouter key (sk-or-...) o vacío si usas env">
             <input id="cfg-openrouter-model" class="input" placeholder="Modelo OpenRouter por defecto (ej. moonshotai/kimi-k2.5)">
             <input id="cfg-openrouter-referer" class="input mono" placeholder="Referer opcional (ej. http://127.0.0.1:7788)">
+            <input id="cfg-openrouter-api-base" class="input mono" placeholder="Base API OpenRouter (vacío = https://openrouter.ai/api/v1; no pegues …/chat/completions/)">
             <input id="cfg-openrouter-title" class="input" placeholder="Nombre app OpenRouter (opcional)">
             <input id="cfg-url" class="input" placeholder="Ollama URL">
             <input id="cfg-model" class="input" placeholder="Modelo Ollama (no es el chat Puter)">
@@ -418,12 +447,14 @@
           return { ok: false, message: label + ': JSON inválido (HTTP ' + r.status + ')\n' + text.slice(0, 400) };
         }
       }
+      const isFlask404 = r.status === 404 && /<!doctype html>/i.test(text);
+      const fix = isFlask404
+        ? '\n\n→ El proceso que escucha en este puerto es una versión ANTIGUA del builder (no existe esa ruta en el código actual). ' +
+          'Cierra la app, en Terminal ejecuta: lsof -ti :7788 | xargs kill  y vuelve a abrir «Uncensored Builder.command» desde la carpeta Uncensored-LLM-appdata (o: python3 builder_server.py en esa carpeta).'
+        : '\n\n→ Si acabas de actualizar archivos: reinicia el servidor del builder. Comprueba que abres el dashboard por http://127.0.0.1:7788/dashboard y no como file://. ';
       return {
         ok: false,
-        message: label + ': el servidor respondió HTML (HTTP ' + r.status + '), no JSON.\n' +
-          'Causa habitual: builder sin reiniciar tras actualizar (falta /api/openrouter u otra ruta).\n' +
-          'En Terminal: lsof -ti :7788 | xargs kill  y vuelve a abrir Uncensored Builder.\n\n' +
-          text.slice(0, 450),
+        message: label + ': el servidor devolvió HTML (HTTP ' + r.status + '), no JSON — no es la API de OpenRouter, es el builder local.' + fix,
       };
     }
 
@@ -436,6 +467,8 @@
     let lastGhPreviewText = '';
     let lastUploadedName = '';
     let puterHistory = [];
+    let chatAbortController = null;
+    let chatStopRequested = false;
     const DEFAULT_OPENROUTER_MODEL = 'moonshotai/kimi-k2.5';
     /** Modelo OpenRouter recomendado para herramientas (builder_read, search_replace, workspace_run). */
     const REPAIR_BUILDER_AGENT_MODEL = 'anthropic/claude-3.5-sonnet';
@@ -811,6 +844,270 @@
       if(sb && window.innerWidth <= 900) sb.classList.remove('open');
     }
 
+    function escapeHtml(s){
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    function ensureConvId(){
+      if(!currentConvId){
+        currentConvId = (crypto.randomUUID && crypto.randomUUID()) || ('id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10));
+      }
+    }
+
+    function getSaveProject(){
+      return (document.getElementById('conv-save-project')?.value || '').trim().slice(0, 120);
+    }
+
+    function syncLastAssistantFromUI(assistantEl){
+      if(!assistantEl) return;
+      const text = (assistantEl._aiTextEl && assistantEl._aiTextEl.textContent) ? assistantEl._aiTextEl.textContent : '';
+      const last = puterHistory[puterHistory.length - 1];
+      if(last && last.role === 'user'){
+        puterHistory.push({ role:'assistant', content: text || '(interrumpido)' });
+      } else if(last && last.role === 'assistant'){
+        last.content = text || last.content;
+      }
+    }
+
+    async function persistCurrentConversation(){
+      if(!currentConvId) return;
+      const messages = puterHistory.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role:m.role, content: m.content || '' }));
+      if(!messages.length) return;
+      let title = 'New chat';
+      const fu = messages.find(m => m.role === 'user');
+      if(fu && fu.content) title = fu.content.slice(0, 60);
+      try{
+        await fetch(api('/api/conversations/save'), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            id: currentConvId,
+            title,
+            messages,
+            project: getSaveProject(),
+            archived: false
+          })
+        });
+        await loadConversations();
+      }catch(_){}
+    }
+
+    function stopChatGeneration(){
+      chatStopRequested = true;
+      try{ chatAbortController?.abort(); }catch(_){}
+    }
+
+    function scrollChatToBottom(){
+      const box = document.getElementById('messages');
+      if(box) box.scrollTop = box.scrollHeight;
+    }
+
+    async function loadConversationProjects(){
+      const res = await fetchJsonOrExplain(api('/api/conversation-projects'), 'Projects');
+      const sel = document.getElementById('conv-project-filter');
+      if(!res.ok || !sel) return;
+      const cur = sel.value;
+      const projects = res.data.projects || [];
+      sel.innerHTML = '<option value="__all__">Todos</option><option value="">(Sin proyecto)</option>';
+      for(const p of projects){
+        if(p === '') continue;
+        const o = document.createElement('option');
+        o.value = p;
+        o.textContent = p;
+        sel.appendChild(o);
+      }
+      if([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    }
+
+    function convListUrl(){
+      const af = document.getElementById('conv-archived-filter')?.value || 'active';
+      let q = 'archived=';
+      if(af === 'all') q += 'all';
+      else if(af === 'archived') q += '1';
+      else q += '0';
+      const pf = document.getElementById('conv-project-filter')?.value;
+      if(pf && pf !== '__all__') q += '&project=' + encodeURIComponent(pf);
+      return api('/api/conversations') + '?' + q;
+    }
+
+    async function loadConversations(){
+      const r = await fetch(convListUrl());
+      let convs = [];
+      try{ convs = await r.json(); }catch(_){ return; }
+      const box = document.getElementById('conversations');
+      if(!box) return;
+      box.innerHTML = '';
+      for(const c of convs){
+        const row = document.createElement('div');
+        row.className = 'conv-row';
+        const ar = c.archived ? ' [arch]' : '';
+        row.innerHTML = `
+          <div class="conv-row-main" title="${escapeHtml(c.title)}">
+            <span class="conv-row-title">${escapeHtml(c.title || 'Sin título')}</span> <span class="small">(${c.message_count || 0})</span>${ar}
+        </div>
+          <div class="conv-row-actions">
+            <button type="button" class="btn secondary small" title="Renombrar">✎</button>
+            <button type="button" class="btn secondary small" title="Archivar">${c.archived ? '↩' : '📦'}</button>
+            <button type="button" class="btn secondary small" title="Eliminar">🗑</button>
+          </div>`;
+        row.querySelector('.conv-row-main').onclick = () => openConversation(c.id);
+        const btns = row.querySelectorAll('.conv-row-actions button');
+        btns[0].onclick = (e) => { e.stopPropagation(); renameConversationPrompt(c.id, c.title); };
+        btns[1].onclick = (e) => { e.stopPropagation(); toggleArchiveConversation(c.id, !c.archived); };
+        btns[2].onclick = (e) => { e.stopPropagation(); deleteConversationConv(c.id); };
+        box.appendChild(row);
+      }
+    }
+
+    function promptNewProject(){
+      const name = prompt('Nombre del proyecto (aparecerá en el filtro y puedes escribirlo en «Guardar nuevos chats en»):', '');
+      if(name == null) return;
+      const t = name.trim().slice(0, 120);
+      const sp = document.getElementById('conv-save-project');
+      if(sp) sp.value = t;
+      try{ localStorage.setItem('ub_save_project', t); }catch(_){}
+      loadConversationProjects().then(() => {
+        const sel = document.getElementById('conv-project-filter');
+        if(sel && t){
+          if(![...sel.options].some(o => o.value === t)){
+            const o = document.createElement('option');
+            o.value = t;
+            o.textContent = t;
+            sel.appendChild(o);
+          }
+          sel.value = t;
+        }
+        loadConversations();
+      });
+    }
+
+    async function openConversation(id){
+      const rr = await fetch(api('/api/conversations/' + encodeURIComponent(id)));
+      const full = await rr.json();
+      currentConvId = full.id || id;
+      if(full.project != null){
+        const sp = document.getElementById('conv-save-project');
+        if(sp) sp.value = (full.project || '').trim();
+      }
+      const m = document.getElementById('messages');
+      m.innerHTML = '';
+      rebuildHistoryFromServer(full);
+      for(const msg of (full.messages || [])){
+        if(msg.role === 'user' || msg.role === 'assistant')
+          addMessage(msg.role, msg.content || '');
+      }
+      setView('chat');
+      scrollChatToBottom();
+    }
+
+    function rebuildHistoryFromServer(conv){
+      puterHistory = [];
+      for(const m of (conv.messages || [])){
+        if(m.role === 'user' || m.role === 'assistant')
+          puterHistory.push({ role: m.role, content: m.content || '' });
+      }
+      ensurePuterSystemMessage();
+    }
+
+    function renameConversationPrompt(id, title){
+      const n = prompt('Nuevo nombre de la conversación:', title || '');
+      if(n == null || !n.trim()) return;
+      fetch(api('/api/conversations/' + encodeURIComponent(id)), {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ title: n.trim().slice(0, 200) })
+      }).then(() => loadConversations());
+    }
+
+    function toggleArchiveConversation(id, archived){
+      fetch(api('/api/conversations/' + encodeURIComponent(id)), {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ archived: !!archived })
+      }).then(() => loadConversations());
+    }
+
+    function deleteConversationConv(id){
+      if(!confirm('¿Eliminar esta conversación del disco?')) return;
+      fetch(api('/api/conversations/' + encodeURIComponent(id)), { method:'DELETE' })
+        .then(() => {
+          if(currentConvId === id) newChat();
+          loadConversations();
+        });
+    }
+
+    function renderUploadsHtml(files, containerId){
+      const el = document.getElementById(containerId);
+      if(!el) return;
+      if(!files.length){
+        el.innerHTML = '<div class="small">Sin archivos</div>';
+        return;
+      }
+      el.innerHTML = files.map(f => {
+        const nameEnc = encodeURIComponent(f.name);
+        return `<label class="file-pick-row"><input type="checkbox" class="upload-pick-cb" data-fname="${nameEnc}"> <span class="mono">${escapeHtml(f.name)}</span> <span class="small">(${Math.round(f.size/1024)} KB)</span></label>`;
+      }).join('');
+    }
+
+    function getCheckedUploadNamesFromRoot(rootEl){
+      if(!rootEl) return [];
+      return [...rootEl.querySelectorAll('.upload-pick-cb:checked')].map(cb => decodeURIComponent(cb.getAttribute('data-fname') || '')).filter(Boolean);
+    }
+
+    async function includeSelectedUploadsInContext(){
+      const names = getCheckedUploadNamesFromRoot(document.getElementById('files-mini'));
+      if(!names.length) return;
+      for(const name of names){
+        const r = await fetch('/api/file/' + encodeURIComponent(name));
+        const text = await r.text();
+        pushContext('uploads/' + name, text);
+      }
+      renderContextChips();
+      setView('chat');
+    }
+
+    async function includeSelectedUploadsFromList(containerId){
+      const root = document.getElementById(containerId);
+      const boxes = root ? root.querySelectorAll('.upload-pick-cb:checked') : [];
+      const names = [...boxes].map(cb => decodeURIComponent(cb.getAttribute('data-fname') || '')).filter(Boolean);
+      if(!names.length) return;
+      for(const name of names){
+        const r = await fetch('/api/file/' + encodeURIComponent(name));
+        const text = await r.text();
+        pushContext('uploads/' + name, text);
+      }
+      renderContextChips();
+      setView('chat');
+    }
+
+    async function deleteSelectedUploads(){
+      const names = getCheckedUploadNamesFromRoot(document.getElementById('files-mini'));
+      if(!names.length) return;
+      if(!confirm('¿Eliminar ' + names.length + ' archivo(s) del servidor?')) return;
+      await fetch(api('/api/files/delete'), {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ names })
+      });
+      await loadFiles();
+    }
+
+    async function deleteSelectedUploadsFromList(containerId){
+      const root = document.getElementById(containerId);
+      const boxes = root ? root.querySelectorAll('.upload-pick-cb:checked') : [];
+      const names = [...boxes].map(cb => decodeURIComponent(cb.getAttribute('data-fname') || '')).filter(Boolean);
+      if(!names.length) return;
+      if(!confirm('¿Eliminar ' + names.length + ' archivo(s)?')) return;
+      await fetch(api('/api/files/delete'), {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ names })
+      });
+      await loadFiles();
+    }
+
     function setChatBusy(busy){
       const box = document.querySelector('.chat-box');
       if(box) box.classList.toggle('chat-busy', !!busy);
@@ -818,6 +1115,8 @@
       if(inp) inp.disabled = !!busy;
       const btn = document.getElementById('chat-send-btn');
       if(btn) btn.disabled = !!busy;
+      const st = document.getElementById('chat-stop-btn');
+      if(st) st.style.display = busy ? 'inline-block' : 'none';
     }
 
     function setAssistantMessageText(el, text){
@@ -1112,6 +1411,7 @@
         groq_model: document.getElementById('cfg-groq-model')?.value || document.getElementById('groq-model')?.value || 'llama-3.3-70b-versatile',
         openrouter_model: document.getElementById('cfg-openrouter-model')?.value || document.getElementById('openrouter-model')?.value || DEFAULT_OPENROUTER_MODEL,
         openrouter_http_referer: document.getElementById('cfg-openrouter-referer')?.value || '',
+        openrouter_api_base: document.getElementById('cfg-openrouter-api-base')?.value || '',
         openrouter_app_title: document.getElementById('cfg-openrouter-title')?.value || '',
         swarm_llm_backend: document.getElementById('cfg-swarm-backend')?.value || 'ollama',
       };
@@ -1133,7 +1433,8 @@
         const r = await fetch('/api/chat/stream', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({query: fullQuery, conv_id: currentConvId})
+          body: JSON.stringify({query: fullQuery, conv_id: currentConvId}),
+          signal: chatAbortController ? chatAbortController.signal : undefined
         });
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -1141,6 +1442,7 @@
         setAssistantMessageText(assistant, '');
         let acc = '';
         while(true){
+          if(chatStopRequested) break;
           const {value, done} = await reader.read();
           if(done) break;
           buf += dec.decode(value, {stream:true});
@@ -1155,6 +1457,10 @@
           }
         }
         await loadConversations();
+      } catch(e){
+        if(!(e && (e.name === 'AbortError' || chatStopRequested))){
+          setAssistantMessageText(assistant, 'Error Ollama: ' + (e?.message || String(e)));
+        }
       } finally{
         finishAssistantMessage(assistant);
       }
@@ -1183,6 +1489,7 @@
         let textOut = '';
         let reasoningOut = '';
         for await (const part of response){
+          if(chatStopRequested) break;
           if(part?.reasoning) reasoningOut += part.reasoning;
           if(part?.text) textOut += part.text;
           if(reasoningOut || textOut){
@@ -1192,7 +1499,8 @@
           }
         }
         const combined = (reasoningOut ? reasoningOut + '\n\n' : '') + textOut;
-        puterHistory.push({ role:'assistant', content: combined });
+        if(!chatStopRequested) puterHistory.push({ role:'assistant', content: combined });
+        else if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') syncLastAssistantFromUI(assistant);
       } catch(e){
         setAssistantMessageText(assistant, 'Error Puter: ' + (e?.message || String(e)));
       } finally{
@@ -1209,7 +1517,8 @@
         const r = await fetch(api('/api/chat/groq/stream'), {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ messages: puterHistory, model })
+          body: JSON.stringify({ messages: puterHistory, model }),
+          signal: chatAbortController ? chatAbortController.signal : undefined
         });
         if(!r.ok){
           let msg = r.statusText || 'HTTP ' + r.status;
@@ -1229,6 +1538,7 @@
         let buf = '';
         let full = '';
         while(true){
+          if(chatStopRequested) break;
           const {value, done} = await reader.read();
           if(done) break;
           buf += dec.decode(value, {stream:true});
@@ -1251,10 +1561,14 @@
             }catch(_){}
           }
         }
-        puterHistory.push({ role:'assistant', content: full });
+        if(!chatStopRequested) puterHistory.push({ role:'assistant', content: full });
       } catch(e){
-        setAssistantMessageText(assistant, 'Error Groq: ' + (e?.message || String(e)));
-        if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+        if(e && (e.name === 'AbortError' || chatStopRequested)){
+          if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') syncLastAssistantFromUI(assistant);
+        } else {
+          setAssistantMessageText(assistant, 'Error Groq: ' + (e?.message || String(e)));
+          if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+        }
       } finally{
         finishAssistantMessage(assistant);
       }
@@ -1269,7 +1583,8 @@
         const r = await fetch(api('/api/chat/openrouter/stream'), {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ messages: puterHistory, model })
+          body: JSON.stringify({ messages: puterHistory, model }),
+          signal: chatAbortController ? chatAbortController.signal : undefined
         });
         if(!r.ok){
           let msg = r.statusText || 'HTTP ' + r.status;
@@ -1293,6 +1608,7 @@
           setAssistantMessageText(assistant, reasoningAcc ? (reasoningAcc + (full ? '\n\n' + full : '')) : full);
         }
         while(true){
+          if(chatStopRequested) break;
           const {value, done} = await reader.read();
           if(done) break;
           buf += dec.decode(value, {stream:true});
@@ -1319,10 +1635,14 @@
           }
         }
         const combined = (reasoningAcc ? reasoningAcc + '\n\n' : '') + full;
-        puterHistory.push({ role:'assistant', content: combined });
+        if(!chatStopRequested) puterHistory.push({ role:'assistant', content: combined });
       } catch(e){
-        setAssistantMessageText(assistant, 'Error OpenRouter: ' + (e?.message || String(e)));
-        if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+        if(e && (e.name === 'AbortError' || chatStopRequested)){
+          if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') syncLastAssistantFromUI(assistant);
+        } else {
+          setAssistantMessageText(assistant, 'Error OpenRouter: ' + (e?.message || String(e)));
+          if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+        }
       } finally{
         finishAssistantMessage(assistant);
       }
@@ -1348,7 +1668,8 @@
         const r = await fetch(api('/api/chat/openrouter/agent'), {
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ messages: puterHistory, model, workspace_path })
+          body: JSON.stringify({ messages: puterHistory, model, workspace_path }),
+          signal: chatAbortController ? chatAbortController.signal : undefined
         });
         let j = {};
         try{ j = await r.json(); }catch(_){ j = {}; }
@@ -1363,8 +1684,12 @@
         setAssistantMessageText(assistant, full);
         puterHistory.push({ role:'assistant', content: full });
       } catch(e){
-        setAssistantMessageText(assistant, 'Error modo agente: ' + (e?.message || String(e)));
-        if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+        if(e && (e.name === 'AbortError' || chatStopRequested)){
+          if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') syncLastAssistantFromUI(assistant);
+        } else {
+          setAssistantMessageText(assistant, 'Error modo agente: ' + (e?.message || String(e)));
+          if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+        }
       } finally{
         finishAssistantMessage(assistant);
       }
@@ -1389,6 +1714,9 @@
         return;
       }
       input.value = '';
+      ensureConvId();
+      chatAbortController = new AbortController();
+      chatStopRequested = false;
       let fullQuery = query;
       if(pendingContext.length){
         const blocks = pendingContext.map(x => `--- ${x.label} ---\n${x.text}`);
@@ -1399,17 +1727,21 @@
       addMessage('user', query);
       const assistant = addMessage('assistant', '', { streaming: true });
       setChatBusy(true);
+      let engUsed = '';
       try{
-        const eng = document.getElementById('chat-engine').value;
-        if(eng === 'groq') await sendMessageGroq(fullQuery, assistant);
-        else if(eng === 'openrouter'){
+        engUsed = document.getElementById('chat-engine').value;
+        if(engUsed === 'groq') await sendMessageGroq(fullQuery, assistant);
+        else if(engUsed === 'openrouter'){
           if(document.getElementById('openrouter-agent-toggle')?.checked) await sendMessageOpenRouterAgent(fullQuery, assistant);
           else await sendMessageOpenRouter(fullQuery, assistant);
         }
-        else if(eng === 'local') await sendMessageLocal(fullQuery, assistant);
+        else if(engUsed === 'local') await sendMessageLocal(fullQuery, assistant);
         else await sendMessagePuter(fullQuery, assistant);
       } finally{
+        if(chatStopRequested) syncLastAssistantFromUI(assistant);
         setChatBusy(false);
+        if(engUsed && engUsed !== 'local') await persistCurrentConversation();
+        chatAbortController = null;
       }
     }
 
@@ -1638,11 +1970,8 @@
     async function loadFiles(){
       const r = await fetch('/api/files');
       const files = await r.json();
-      const list = document.getElementById('files-list');
-      const mini = document.getElementById('files-mini');
-      const html = files.map(f => `<div class="item">${f.name} <span class="small">(${Math.round(f.size/1024)} KB)</span></div>`).join('') || '<div class="small">Sin archivos</div>';
-      list.innerHTML = html;
-      mini.innerHTML = html;
+      renderUploadsHtml(files, 'files-list');
+      renderUploadsHtml(files, 'files-mini');
     }
 
     async function doSearch(){
@@ -1870,6 +2199,13 @@
       refreshPuterAuthStatus().catch(()=>{});
       window.addEventListener('puter-ready', () => { refreshPuterAuthStatus().catch(()=>{}); });
       await refreshHealth();
+      try{
+        const sp = document.getElementById('conv-save-project');
+        const sv = localStorage.getItem('ub_save_project');
+        if(sp && sv) sp.value = sv;
+        if(sp) sp.addEventListener('change', function(){ try{ localStorage.setItem('ub_save_project', this.value); }catch(_){} });
+      }catch(_){}
+      await loadConversationProjects();
       await loadConversations();
       await loadFiles();
       await refreshJobs();
@@ -1877,7 +2213,7 @@
       const jr = await r.json().catch(() => ({}));
       const sr = document.getElementById('scan-root');
       if(sr && !sr.value.trim() && jr.roots && jr.roots[0]) sr.value = jr.roots[0];
-      addMessage('assistant', 'Listo. Mientras el asistente responde verás un indicador girando (como ChatGPT). Puter: usa «Iniciar sesión en Puter» si el chat no pide. OpenRouter Groq: claves en Settings + Guardar (y copia en el navegador). Modelos OpenRouter: «Cargar modelos» o desactiva «Solo gratis» si la lista vacía. Terminal rápida = carpeta Workspace.');
+      addMessage('assistant', 'Listo. «Detener» corta la generación; «↓ Final» baja al final del chat. Las conversaciones se guardan en disco al terminar cada turno (Puter / Groq / OpenRouter). Ollama local ya guardaba solo. Usa «Guardar nuevos chats en» para el nombre de proyecto; en la lista: renombrar, archivar, eliminar. Archivos subidos: marca varios y añádelos al contexto o bórralos.');
     });
   </script>
 </body>

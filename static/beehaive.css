@@ -151,11 +151,25 @@ a{color:var(--accent-soft)}
 .chat-box.chat-shell .view-title{font-size:18px;margin:0 0 4px}
 .chat-box.chat-shell .view-sub{margin:0 0 14px}
 
+.msgs-wrap{position:relative}
+.msgs-wrap .msgs{
+  max-height:min(58vh,640px);
+}
 .msgs{
   flex:1;min-height:240px;overflow:auto;
   background:var(--panel-soft);border-radius:var(--radius);padding:20px 18px;border:1px solid var(--border);
   scroll-behavior:smooth;
 }
+.chat-scroll-bottom{position:absolute;right:10px;bottom:12px;z-index:3;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.conv-list{max-height:min(38vh,340px);overflow:auto;padding-right:4px}
+.conv-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:8px;background:var(--panel-soft)}
+.conv-row-main{flex:1;min-width:0;cursor:pointer;font-size:12px;line-height:1.35}
+.conv-row-title{font-weight:600;color:var(--text)}
+.conv-row-actions{display:flex;flex-wrap:wrap;gap:4px;flex-shrink:0}
+.conv-row-actions .btn{padding:4px 8px;font-size:11px;min-width:auto}
+.file-pick-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer}
+.file-pick-row:last-child{border-bottom:none}
+.files-mini-list{max-height:220px;overflow:auto;padding-right:4px}
 .msg{padding:14px 16px;border-radius:16px;margin-bottom:14px;max-width:min(92%,640px);white-space:pre-wrap;word-break:break-word;font-size:15px;line-height:1.55}
 .msg.user{background:linear-gradient(145deg,#3d3428,#2a251f);margin-left:auto;border:1px solid #524636}
 .msg.assistant{background:#1c1a17;border:1px solid var(--border)}

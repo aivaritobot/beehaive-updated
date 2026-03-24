@@ -13,14 +13,16 @@ source "$DIR/venv/bin/activate"
 mkdir -p "$DIR/memory"
 LOG_FILE="$DIR/memory/builder_server.log"
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+  bi=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${PORT}/api/builder/install" 2>/dev/null || echo "000")
   gq=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${PORT}/api/groq/test" 2>/dev/null || echo "000")
   orc=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${PORT}/api/openrouter/test" 2>/dev/null || echo "000")
-  if [[ "$gq" == "200" && "$orc" == "200" ]]; then
+  cp=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${PORT}/api/conversation-projects" 2>/dev/null || echo "000")
+  if [[ "$gq" == "200" && "$orc" == "200" && "$bi" == "200" && "$cp" == "200" ]]; then
     open "http://127.0.0.1:${PORT}/dashboard"
     exit 0
   fi
-  if [[ "$gq" == "404" || "$orc" == "404" ]]; then
-    echo "$(date "+%Y-%m-%d %H:%M:%S") Reiniciando servidor antiguo (404 test Groq/OpenRouter)…" >>"$LOG_FILE"
+  if [[ "$gq" == "404" || "$orc" == "404" || "$bi" == "404" || "$cp" == "404" ]]; then
+    echo "$(date "+%Y-%m-%d %H:%M:%S") Reiniciando servidor antiguo (404 en ruta API: gq=$gq orc=$orc bi=$bi cp=$cp)…" >>"$LOG_FILE"
     pids=$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
     if [[ -n "${pids:-}" ]]; then
       kill $pids 2>/dev/null || true

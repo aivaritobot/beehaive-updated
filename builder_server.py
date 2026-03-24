@@ -65,6 +65,8 @@ DEFAULT_CONFIG = {
     "openrouter_max_tokens": 8192,
     # Máximo de vueltas modelo→herramientas en /api/chat/openrouter/agent (evita bucles infinitos).
     "openrouter_agent_max_rounds": 12,
+    # Base API (sin barra final). Vacío = https://openrouter.ai/api/v1 — no uses …/chat/completions/ (404).
+    "openrouter_api_base": "",
     "github": {"token": "", "owner": "", "repo": "", "branch": "main"},
     # Rutas permitidas para /api/local/* (vacío = solo tu $HOME).
     "local_roots": [],
@@ -438,7 +440,7 @@ def _openrouter_chat_completion_nonstream(payload: dict):
     key = _openrouter_api_key()
     if not key:
         raise ValueError("OpenRouter API key missing")
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = _openrouter_endpoint("chat/completions")
     hdrs = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -456,6 +458,7 @@ def _openrouter_chat_completion_nonstream(payload: dict):
                 msg = str(inner or ej)
         except Exception:
             msg = (r.text or r.reason)[:4000]
+        msg = _openrouter_error_hint(r.status_code, msg)
         raise ValueError(f"OpenRouter {r.status_code}: {msg}")
     return r.json()
 
@@ -548,7 +551,60 @@ def _openrouter_extra_headers():
     title = (CONFIG.get("openrouter_app_title") or "").strip()
     if title:
         h["X-Title"] = title
+        h["X-OpenRouter-Title"] = title
     return h
+
+
+OPENROUTER_API_BASE_DEFAULT = "https://openrouter.ai/api/v1"
+
+
+def _safe_openrouter_api_base(val: str) -> str:
+    """Normaliza base https://openrouter.ai/api/v1 (sin barra final). Rechaza rutas raras o URL de endpoint pegada por error."""
+    default = OPENROUTER_API_BASE_DEFAULT
+    raw = (val or "").strip().rstrip("/")
+    if not raw:
+        return default
+    try:
+        p = urlparse(raw)
+        if p.scheme != "https":
+            return default
+        host = (p.hostname or "").lower()
+        if host not in ("openrouter.ai", "www.openrouter.ai"):
+            return default
+        path = (p.path or "").rstrip("/")
+        if "/chat/completions" in path:
+            path = path.split("/chat/completions")[0].rstrip("/")
+        if path.endswith("/models"):
+            path = path[: -len("/models")].rstrip("/")
+        if path != "/api/v1":
+            return default
+        return f"https://{host}{path}"
+    except Exception:
+        return default
+
+
+def _openrouter_api_base() -> str:
+    return _safe_openrouter_api_base(str(CONFIG.get("openrouter_api_base") or ""))
+
+
+def _openrouter_endpoint(path: str) -> str:
+    """Ej. path 'chat/completions' → …/api/v1/chat/completions (nunca barra final: OpenRouter devuelve 404)."""
+    p = path.strip().lstrip("/").rstrip("/")
+    return f"{_openrouter_api_base()}/{p}"
+
+
+def _openrouter_error_hint(status: int, message: str) -> str:
+    """Texto extra cuando OpenRouter devuelve 404/401 frecuentes."""
+    base = (message or "").strip()
+    if status == 404:
+        return (
+            base
+            + "\n\n[OpenRouter 404] Suele deberse a: (1) URL con barra final …/chat/completions/ — debe ser …/chat/completions; "
+            + "(2) modelo inexistente o retirado — comprueba el ID en https://openrouter.ai/models ."
+        )
+    if status == 401:
+        return base + "\n\n[OpenRouter 401] Clave inválida o caducada: Settings → clave sk-or-… → Guardar, o OPENROUTER_API_KEY."
+    return base
 
 
 def ollama_chat(messages, stream=False):
@@ -580,9 +636,19 @@ def conversation_file(conv_id):
 def load_conversation(conv_id):
     path = conversation_file(conv_id)
     if not path.exists():
-        return {"id": conv_id, "title": "New chat", "updated": datetime.now().isoformat(), "messages": []}
+        return {
+            "id": conv_id,
+            "title": "New chat",
+            "updated": datetime.now().isoformat(),
+            "messages": [],
+            "project": "",
+            "archived": False,
+        }
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        conv = json.load(f)
+    conv.setdefault("project", "")
+    conv.setdefault("archived", False)
+    return conv
 
 
 def save_conversation(conv):
@@ -591,24 +657,57 @@ def save_conversation(conv):
         json.dump(conv, f, indent=2, ensure_ascii=False)
 
 
-def list_conversations():
+def _conv_archived(conv: dict) -> bool:
+    return bool(conv.get("archived"))
+
+
+def list_conversations(project_filter: str | None = None, archived_mode: str = "active"):
+    """
+    archived_mode: 'active' (solo no archivadas), 'archived' (solo archivadas), 'all'.
+    project_filter: None = todos los proyectos; str = coincidencia exacta (vacío = sin proyecto).
+    """
     out = []
     for p in MEMORY_DIR.glob("conv_*.json"):
         try:
             with open(p, "r", encoding="utf-8") as f:
                 conv = json.load(f)
+            ar = _conv_archived(conv)
+            if archived_mode == "active" and ar:
+                continue
+            if archived_mode == "archived" and not ar:
+                continue
+            proj = (conv.get("project") or "").strip()
+            if project_filter is not None and proj != project_filter.strip():
+                continue
             out.append(
                 {
                     "id": conv["id"],
                     "title": conv.get("title", "Untitled"),
                     "updated": conv.get("updated", ""),
                     "message_count": len(conv.get("messages", [])),
+                    "project": proj,
+                    "archived": ar,
                 }
             )
         except Exception:
             pass
     out.sort(key=lambda x: x["updated"], reverse=True)
     return out
+
+
+@app.route("/api/conversation-projects", methods=["GET"])
+def conversation_projects_list():
+    """Nombres de proyecto distintos usados en conversaciones guardadas."""
+    seen = set()
+    for p in MEMORY_DIR.glob("conv_*.json"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                conv = json.load(f)
+            seen.add((conv.get("project") or "").strip())
+        except Exception:
+            pass
+    ordered = sorted(seen, key=lambda x: (x == "", x.lower()))
+    return jsonify({"projects": ordered})
 
 
 @app.route("/")
@@ -648,6 +747,7 @@ def health():
             "groq_model": CONFIG.get("groq_model") or "llama-3.3-70b-versatile",
             "openrouter_configured": bool(ork),
             "openrouter_model": CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5",
+            "openrouter_api_base": _openrouter_api_base(),
             "puter_cdn_url": _safe_puter_cdn_url(CONFIG.get("puter_cdn_url") or ""),
             "ollama_model": ollama_model,
             # Legacy: "model" is the Ollama model (swarm/local APIs), not the dashboard chat brain.
@@ -718,6 +818,8 @@ def config():
     ]:
         if key in data:
             CONFIG[key] = data[key]
+    if "openrouter_api_base" in data:
+        CONFIG["openrouter_api_base"] = _safe_openrouter_api_base(str(data.get("openrouter_api_base") or ""))
     # Solo actualizar claves si vienen con valor (no borrar al guardar con campo vacío).
     if "groq_api_key" in data:
         gk = (data.get("groq_api_key") or "").strip()
@@ -895,7 +997,7 @@ def chat_openrouter_stream():
 
     def generate():
         try:
-            url = "https://openrouter.ai/api/v1/chat/completions"
+            url = _openrouter_endpoint("chat/completions")
             payload = {
                 "model": model,
                 "messages": raw_messages,
@@ -926,6 +1028,7 @@ def chat_openrouter_stream():
                         msg = str(inner or ej)
                 except Exception:
                     msg = (r.text or r.reason)[:4000]
+                msg = _openrouter_error_hint(r.status_code, msg)
                 yield f"data: {json.dumps({'error': f'OpenRouter {r.status_code}: {msg}'})}\n\n"
                 return
             for line in r.iter_lines():
@@ -1111,7 +1214,7 @@ def openrouter_test():
         hdrs = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
         hdrs.update(_openrouter_extra_headers())
         r = requests.get(
-            "https://openrouter.ai/api/v1/models",
+            _openrouter_endpoint("models"),
             headers=hdrs,
             timeout=30,
         )
@@ -1125,6 +1228,7 @@ def openrouter_test():
                     msg = str(inner)
             except Exception:
                 msg = (r.text or "")[:800]
+            msg = _openrouter_error_hint(r.status_code, msg)
             return jsonify({"ok": False, "http": r.status_code, "error": msg}), 200
         data = r.json()
         ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
@@ -1210,7 +1314,7 @@ def _openrouter_fetch_models_raw():
     hdrs.update(_openrouter_extra_headers())
     try:
         r = requests.get(
-            "https://openrouter.ai/api/v1/models",
+            _openrouter_endpoint("models"),
             headers=hdrs,
             timeout=(25, 150),
         )
@@ -1225,6 +1329,7 @@ def _openrouter_fetch_models_raw():
             msg = inner.get("message", str(inner)) if isinstance(inner, dict) else str(inner)
         except Exception:
             msg = (r.text or "")[:800]
+        msg = _openrouter_error_hint(r.status_code, msg)
         return None, f"HTTP {r.status_code}: {msg}"
     try:
         raw = r.json()
@@ -1374,12 +1479,64 @@ def claude_chat_stream():
 
 @app.route("/api/conversations")
 def conversations():
-    return jsonify(list_conversations())
+    am = (request.args.get("archived") or "active").strip().lower()
+    if am in ("1", "true", "yes", "archived"):
+        archived_mode = "archived"
+    elif am in ("all", "*"):
+        archived_mode = "all"
+    else:
+        archived_mode = "active"
+    proj = request.args.get("project")
+    if proj is not None:
+        proj = proj.strip()
+    return jsonify(list_conversations(project_filter=proj, archived_mode=archived_mode))
 
 
-@app.route("/api/conversations/<conv_id>")
-def conversation(conv_id):
-    return jsonify(load_conversation(conv_id))
+@app.route("/api/conversations/save", methods=["POST"])
+def conversations_save():
+    """Crea o actualiza una conversación (chat Puter / OpenRouter / Groq desde el cliente)."""
+    data = request.json or {}
+    conv_id = (data.get("id") or "").strip() or str(uuid.uuid4())
+    conv = load_conversation(conv_id)
+    conv["id"] = conv_id
+    if "messages" in data and isinstance(data["messages"], list):
+        conv["messages"] = data["messages"]
+    if "title" in data:
+        t = (data.get("title") or "").strip()
+        if t:
+            conv["title"] = t[:200]
+    if "project" in data:
+        conv["project"] = (data.get("project") or "").strip()[:120]
+    if "archived" in data:
+        conv["archived"] = bool(data.get("archived"))
+    save_conversation(conv)
+    return jsonify({"ok": True, "id": conv_id})
+
+
+@app.route("/api/conversations/<conv_id>", methods=["GET", "PATCH", "DELETE"])
+def conversation_detail(conv_id):
+    if request.method == "GET":
+        return jsonify(load_conversation(conv_id))
+    if request.method == "DELETE":
+        path = conversation_file(conv_id)
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError as e:
+                return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True})
+    data = request.json or {}
+    conv = load_conversation(conv_id)
+    if "title" in data:
+        t = (data.get("title") or "").strip()
+        if t:
+            conv["title"] = t[:200]
+    if "project" in data:
+        conv["project"] = (data.get("project") or "").strip()[:120]
+    if "archived" in data:
+        conv["archived"] = bool(data.get("archived"))
+    save_conversation(conv)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -1402,9 +1559,55 @@ def files():
     return jsonify(out)
 
 
-@app.route("/api/file/<path:name>")
-def get_file(name):
-    return send_from_directory(UPLOADS_DIR, name, as_attachment=False)
+@app.route("/api/file/<path:name>", methods=["GET", "DELETE"])
+def file_get_or_delete(name):
+    """GET: sirve archivo de uploads/. DELETE: elimina (sin path traversal)."""
+    safe = Path(str(name).replace("\\", "/")).name
+    if not safe:
+        return jsonify({"error": "invalid name"}), 400
+    target = (UPLOADS_DIR / safe).resolve()
+    try:
+        target.relative_to(UPLOADS_DIR.resolve())
+    except ValueError:
+        return jsonify({"error": "path not allowed"}), 400
+    if request.method == "DELETE":
+        if not target.is_file():
+            return jsonify({"error": "not found"}), 404
+        try:
+            target.unlink()
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True})
+    return send_from_directory(UPLOADS_DIR, safe, as_attachment=False)
+
+
+@app.route("/api/files/delete", methods=["POST"])
+def files_delete_bulk():
+    """Elimina varios archivos de uploads/. Body: { \"names\": [\"a.txt\", ...] }"""
+    data = request.json or {}
+    names = data.get("names")
+    if not isinstance(names, list) or not names:
+        return jsonify({"error": "names (non-empty array) required"}), 400
+    deleted = []
+    errors = []
+    for raw in names:
+        safe = Path(str(raw).replace("\\", "/")).name
+        if not safe:
+            errors.append({"name": raw, "error": "invalid"})
+            continue
+        target = (UPLOADS_DIR / safe).resolve()
+        try:
+            target.relative_to(UPLOADS_DIR.resolve())
+        except ValueError:
+            errors.append({"name": safe, "error": "path not allowed"})
+            continue
+        if target.is_file():
+            try:
+                target.unlink()
+                deleted.append(safe)
+            except OSError as e:
+                errors.append({"name": safe, "error": str(e)})
+    return jsonify({"ok": True, "deleted": deleted, "errors": errors})
 
 
 @app.route("/api/web/search", methods=["POST"])
