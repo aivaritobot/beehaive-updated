@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f0e0c">
+  <title>beehAIve UPDATED</title>
+  <link rel="preconnect" href="https://js.puter.com">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/beehaive.css">
+  <script>
+  (function(){
+    var def = 'https://js.puter.com/v2/';
+    function fail(){
+      var b = document.getElementById('puter-banner');
+      if(b){ b.hidden = false; var sp = b.querySelector('span'); if(sp) sp.textContent = 'Puter.js no cargó. Revisa red, bloqueadores de scripts, o Settings → URL Puter; luego F5.'; }
+    }
+    function inject(url){
+      var s = document.createElement('script');
+      s.src = url;
+      s.async = true;
+      /* No uses crossOrigin aquí: fuerza CORS en el script y js.puter.com puede no enviar ACAO → fallo silencioso / onerror. */
+      s.onload = function(){
+        try{
+          window.__puterJsReady = true;
+          setTimeout(function(){ window.dispatchEvent(new Event('puter-ready')); }, 0);
+        }catch(e){}
+      };
+      s.onerror = fail;
+      document.head.appendChild(s);
+    }
+    fetch('/api/config').then(function(r){ return r.json(); }).then(function(c){
+      if(c && c.puter_cdn_url){
+        var u = String(c.puter_cdn_url).trim();
+        if(/^https:\/\/js\.puter\.com(\/|$)/i.test(u)) def = u;
+      }
+    }).catch(function(){}).finally(function(){ inject(def); });
+  })();
+  </script>
+</head>
+<body>
+  <div id="puter-banner" class="app-banner" role="note">
+    <span>Primera vez con Puter: puede aparecer un popup de permiso — acéptalo para usar el chat.</span>
+    <button type="button" class="banner-close" onclick="dismissPuterBanner()" aria-label="Cerrar aviso">×</button>
+  </div>
+  <button type="button" class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Abrir menú">☰</button>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="brand-wrap">
+          <span class="brand" data-i18n="brand_name">beehAIve</span>
+          <span class="brand-badge" data-i18n="brand_updated">UPDATED</span>
+        </div>
+        <div class="tagline" data-i18n="tagline">Tu colmena de trabajo: chat multi-modelo, GitHub, archivos, swarm, navegador y terminal.</div>
+      </div>
+      <div class="lang-switch" role="group" aria-label="Language">
+        <button type="button" data-lang="es" onclick="BeehaiveI18n.setLang('es')">ES</button>
+        <button type="button" data-lang="en" onclick="BeehaiveI18n.setLang('en')">EN</button>
+      </div>
+      <div class="status"><span data-i18n="status_chat">Chat</span>: <span id="chat-engine-label" class="pill">…</span> · <span id="puter-model-display" class="pill">…</span></div>
+      <div class="status"><span data-i18n="status_ollama">Ollama</span>: <span id="ollama-model-name" class="pill">…</span> · <span id="ollama-state" class="pill">…</span></div>
+      <button class="btn" style="width:100%" onclick="newChat()" data-i18n="new_chat">+ Nuevo chat</button>
+      <div class="nav">
+        <button type="button" class="btn secondary nav-btn active" data-view="chat" onclick="setView('chat')" data-i18n="nav_chat">Chat</button>
+        <button type="button" class="btn secondary nav-btn" data-view="swarm" onclick="setView('swarm')" data-i18n="nav_swarm">Swarm</button>
+        <button type="button" class="btn secondary nav-btn" data-view="files" onclick="setView('files')" data-i18n="nav_files">Archivos</button>
+        <button type="button" class="btn secondary nav-btn" data-view="github" onclick="setView('github')" data-i18n="nav_github">GitHub</button>
+        <button type="button" class="btn secondary nav-btn" data-view="search" onclick="setView('search')" data-i18n="nav_search">Internet</button>
+        <button type="button" class="btn secondary nav-btn" data-view="browser" onclick="setView('browser')" data-i18n="nav_browser">Browser</button>
+        <button type="button" class="btn secondary nav-btn" data-view="workspace" onclick="setView('workspace')" data-i18n="nav_workspace">Workspace</button>
+        <button type="button" class="btn secondary nav-btn" data-view="settings" onclick="setView('settings')" data-i18n="nav_settings">Ajustes</button>
+      </div>
+      <hr style="border-color:var(--border);margin:12px 0">
+      <div class="small" data-i18n="conv_list">Conversaciones</div>
+      <div id="conversations" class="side-list"></div>
+    </aside>
+
+    <main class="main">
+      <div class="main-inner">
+      <details class="engine-drawer" id="engine-drawer">
+        <summary data-i18n="engine_drawer">Modelo, APIs y opciones avanzadas</summary>
+      <div class="top">
+        <div class="row">
+          <input id="quick-task" class="input" placeholder="Tarea rápida (Enter → envía al chat Puter)" onkeydown="if(event.key==='Enter'){event.preventDefault();sendFromQuick();}">
+          <button class="btn" onclick="sendFromQuick()">Enviar</button>
+        </div>
+        <div class="row" style="min-width:320px;justify-content:flex-end">
+          <label class="small" for="chat-engine" style="margin-right:6px">Motor chat:</label>
+          <select id="chat-engine" class="input" style="max-width:200px;padding:8px" onchange="onChatEngineChange()" title="Puter = sin key en servidor; Groq / OpenRouter = clave en Settings; Ollama = local">
+            <option value="puter">Puter</option>
+            <option value="groq">Groq</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="local">Ollama local</option>
+          </select>
+          <button type="button" class="btn secondary small" onclick="repairBuilderPreset()" title="Activa OpenRouter + modo agente + modelo con tool-calling, guarda en Settings y pone Workspace en la carpeta del builder">Reparar builder</button>
+          <span id="puter-only-wrap" style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px">
+          <select id="puter-model" class="input" style="max-width:min(320px,42vw);padding:8px;font-size:12px" title="OpenAI / Anthropic vía Puter.js (puter.ai.chat)">
+            <optgroup label="GPT-5.4 (rápido / general)">
+              <option value="gpt-5.4-nano">gpt-5.4-nano</option>
+              <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+              <option value="gpt-5.4">gpt-5.4</option>
+              <option value="gpt-5.4-pro">gpt-5.4-pro</option>
+            </optgroup>
+            <optgroup label="GPT-5.3 · chat / Codex">
+              <option value="gpt-5.3-chat">gpt-5.3-chat</option>
+              <option value="gpt-5.3-codex">gpt-5.3-codex</option>
+            </optgroup>
+            <optgroup label="GPT-5.2">
+              <option value="gpt-5.2">gpt-5.2</option>
+              <option value="gpt-5.2-chat">gpt-5.2-chat</option>
+              <option value="openai/gpt-5.2-chat">openai/gpt-5.2-chat (web search ✓)</option>
+              <option value="gpt-5.2-pro">gpt-5.2-pro</option>
+              <option value="gpt-5.2-codex">gpt-5.2-codex</option>
+            </optgroup>
+            <optgroup label="GPT-5.1 · Codex">
+              <option value="gpt-5.1">gpt-5.1</option>
+              <option value="gpt-5.1-chat-latest">gpt-5.1-chat-latest</option>
+              <option value="gpt-5.1-codex-mini">gpt-5.1-codex-mini</option>
+              <option value="gpt-5.1-codex-max">gpt-5.1-codex-max</option>
+            </optgroup>
+            <optgroup label="OpenAI (prefijo) · OSS / razonamiento">
+              <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+            </optgroup>
+            <optgroup label="Anthropic (Puter)">
+              <option value="claude-sonnet-4">claude-sonnet-4</option>
+              <option value="claude-opus-4">claude-opus-4</option>
+              <option value="claude-3-7-sonnet">claude-3-7-sonnet</option>
+            </optgroup>
+          </select>
+          <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap" title="Añade tools: web_search (Puter). Combina bien con openai/gpt-5.2-chat">
+            <input type="checkbox" id="puter-web-search" onchange="try{localStorage.setItem(\'ub_puter_web_search\', this.checked?\'1\':\'0\');}catch(_){}">
+            <span>Web search</span>
+          </label>
+          <div class="small" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;width:100%;max-width:min(520px,96vw)">
+            <span id="puter-auth-status" class="small" style="color:var(--muted)">Puter: …</span>
+            <button type="button" class="btn secondary small" id="puter-signin-btn" onclick="puterSignIn()">Iniciar sesión en Puter</button>
+            <button type="button" class="btn secondary small" id="puter-signout-btn" onclick="puterSignOut()" style="display:none">Cerrar sesión Puter</button>
+          </div>
+          </span>
+          <span id="groq-only-wrap" style="display:none;align-items:center;gap:8px">
+            <select id="groq-model" class="input" style="max-width:min(300px,45vw);padding:8px;font-size:12px" title="IDs oficiales Groq (consola.groq.com/docs/models). Evita modelos deprecados.">
+              <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+              <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+              <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+              <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+              <option value="meta-llama/llama-4-scout-17b-16e-instruct">llama-4-scout-17b (preview)</option>
+              <option value="qwen/qwen3-32b">qwen/qwen3-32b (preview)</option>
+            </select>
+          </span>
+          <span id="openrouter-only-wrap" style="display:none;flex-direction:column;align-items:stretch;gap:8px;max-width:min(520px,96vw)">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+              <button type="button" class="btn secondary small" onclick="loadOpenRouterModelList(false)">Cargar modelos</button>
+              <button type="button" class="btn secondary small" onclick="loadOpenRouterModelList(true)" title="Ignora caché local y vuelve a pedir la lista a OpenRouter">Forzar red</button>
+              <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap" title="Solo variantes :free, openrouter/free o precio 0 en la API">
+                <input type="checkbox" id="openrouter-free-only" onchange="loadOpenRouterModelList(false)">
+                <span>Solo gratis</span>
+              </label>
+            </div>
+            <div class="small" style="color:var(--muted);line-height:1.4">Requiere clave en Settings + Guardar. Si la lista sale vacía: <strong>desactiva «Solo gratis»</strong> o usa el datalist / ID manual. «Probar OpenRouter» en Settings valida la clave.</div>
+            <select id="openrouter-model-pick" class="input mono" style="font-size:11px;max-height:140px" title="Lista desde la API (requiere clave guardada)" onchange="onOpenRouterPick()">
+              <option value="">— Cargando lista o pulsa «Cargar modelos» —</option>
+            </select>
+            <input id="openrouter-model" class="input mono" style="padding:8px;font-size:12px" list="openrouter-model-list" placeholder="ID (ej. moonshotai/kimi-k2.5, Venice o Claude en la lista)" title="Puedes pegar cualquier ID de openrouter.ai/models" onchange="ensurePuterSystemMessage()" oninput="ensurePuterSystemMessage()">
+            <datalist id="openrouter-model-list"></datalist>
+            <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:4px" title="El servidor ejecuta herramientas: búsqueda web, shell en Workspace, lectura/escritura y parches sobre el código del builder (auto-reparación). Requiere modelo con tool-calling (Claude, GPT-4, etc.).">
+              <input type="checkbox" id="openrouter-agent-toggle" onchange="ensurePuterSystemMessage()">
+              <span>Modo agente (web, terminal, <strong>editar este builder</strong>)</span>
+            </label>
+          </span>
+          <label class="small" style="margin-left:8px;display:inline-flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap" title="Activa el protocolo completo: el modelo elige herramientas del builder según la tarea">
+            <input type="checkbox" id="work-mode-toggle" onchange="setWorkMode(this.checked)">
+            <span style="font-weight:600;color:var(--accent)" data-i18n="work_mode">Modo work</span>
+          </label>
+      </div>
+      </details>
+
+      <div class="view-stack">
+      <section id="view-chat" class="view chat-layout active">
+        <div class="chat-stage">
+        <div class="chat-column">
+        <div class="panel chat-box chat-shell">
+          <h2 class="view-title" data-i18n="chat_title">Chat</h2>
+          <p class="view-sub" data-i18n="chat_sub">Elige motor en «Modelo, APIs…». Terminal rápida en tu Workspace. Sin procesos en segundo plano: ejecutas tú lo que indique el asistente.</p>
+          <div class="small" style="margin-bottom:6px" data-i18n="ctx_ready">Contexto para el próximo mensaje</div>
+          <div id="context-chips" class="small" style="min-height:22px;margin-bottom:6px"></div>
+          <button type="button" class="btn secondary small" onclick="clearContext()" data-i18n="clear_ctx">Limpiar contexto</button>
+          <div id="messages" class="msgs" style="margin-top:12px"></div>
+          <div class="chat-composer-block">
+          <div class="small" style="margin-bottom:6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px"><span><span data-i18n="ws_path">Workspace</span>: <span class="mono" id="chat-ws-path-display">—</span></span><button type="button" class="btn secondary small" onclick="useBuilderInstallAsWorkspace()" title="Rellena el campo Workspace (pestaña inferior) con la carpeta de esta app, para git/pytest en el mismo repo">Usar carpeta del builder</button></div>
+          <div class="small" style="margin-bottom:6px" data-i18n="term_quick">Terminal rápida</div>
+          <div class="composer" style="margin-top:4px">
+            <input id="chat-quick-cmd" class="input mono" data-i18n="term_placeholder" placeholder="Comando shell…" onkeydown="if(event.key==='Enter'){event.preventDefault();runChatQuickCmd();}">
+            <button type="button" class="btn secondary" onclick="runChatQuickCmd()" data-i18n-title="term_quick" title="Workspace" data-i18n="term_run">Ejecutar</button>
+          </div>
+          <pre id="chat-cmd-output" class="small mono" style="margin-top:8px;max-height:120px;overflow:auto;display:none"></pre>
+          <div class="composer" style="margin-top:12px">
+            <input id="chat-input" class="input" data-i18n="chat_placeholder" placeholder="Escribe un mensaje…" onkeypress="if(event.key==='Enter')sendMessage()">
+            <button type="button" class="btn" id="chat-send-btn" onclick="sendMessage()" data-i18n="chat_send">Enviar</button>
+          </div>
+          </div>
+        </div>
+        </div>
+        </div>
+        <aside class="panel chat-side-panel">
+          <div class="small" data-i18n="upload_label">Subir archivo (uploads/)</div>
+          <input type="file" id="uploader" class="input" onchange="uploadFile(event)">
+          <div id="files-mini" class="small" style="margin-top:10px"></div>
+          <button type="button" class="btn secondary small" style="margin-top:8px;width:100%" onclick="includeUploadInContext()" data-i18n="include_upload">Incluir último archivo en contexto</button>
+          <button type="button" class="btn secondary small" style="margin-top:8px;width:100%" onclick="includeSkillsPackInContext()" data-i18n="include_skills">Incluir pack de skills</button>
+        </aside>
+      </section>
+
+      <section id="view-swarm" class="view">
+        <div class="panel">
+          <p class="small" style="margin:0 0 10px;line-height:1.4">Swarm puede usar <strong>Ollama local</strong>, <strong>OpenRouter</strong> o <strong>Groq</strong> (mismas claves que en Settings). Ollama requiere daemon + modelo; nube requiere clave guardada. Opción <strong>Pipeline</strong> encadena roles (salida de uno → contexto del siguiente), como HiveMind en beehAIve.</p>
+          <div class="small">Roles separados (ej: researcher, designer, coder, reviewer)</div>
+          <div class="grid2" style="margin-top:10px">
+            <input id="swarm-task" class="input" placeholder="Tarea a distribuir">
+            <input id="swarm-roles" class="input" value="researcher,designer,coder,reviewer">
+            <label class="small" style="display:flex;align-items:center;gap:8px">Motor swarm
+              <select id="swarm-llm-backend" class="input" style="flex:1">
+                <option value="ollama">Ollama (local)</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="groq">Groq</option>
+              </select>
+            </label>
+            <input id="swarm-model-override" class="input mono" placeholder="Modelo opcional (ID OpenRouter o Groq; vacío = Settings)">
+            <input id="swarm-workspace" class="input" value="/Users/alvaro/Uncensored-LLM-appdata" placeholder="Ruta repo para ramas">
+            <label class="small"><input id="swarm-commit" type="checkbox"> Auto-commit por agente</label>
+            <input id="swarm-base-branch" class="input" value="main" placeholder="Base branch">
+            <label class="small"><input id="swarm-worktrees" type="checkbox" checked> Usar worktrees aislados</label>
+            <label class="small"><input id="swarm-pipeline" type="checkbox"> Pipeline encadenado (no paralelo)</label>
+          </div>
+          <button class="btn" style="margin-top:10px" onclick="runSwarm()">Lanzar swarm</button>
+          <button class="btn secondary" style="margin-top:10px" onclick="refreshJobs()">Actualizar jobs</button>
+          <div id="swarm-output" style="margin-top:12px"></div>
+          <pre id="jobs-output"></pre>
+          <div class="grid2" style="margin-top:10px">
+            <input id="agent-branch" class="input" placeholder="agent/coder-xxxx">
+            <input id="agent-base-branch" class="input" value="main" placeholder="base branch">
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn secondary" onclick="showAgentChanges()">Ver diffs de rama</button>
+            <button class="btn secondary" onclick="mergeAgentBranch()">Merge rama al base</button>
+            <button class="btn secondary" onclick="showWorktrees()">Listar worktrees</button>
+          </div>
+          <pre id="agent-diff-output"></pre>
+        </div>
+      </section>
+
+      <section id="view-files" class="view">
+        <div class="grid2">
+          <div class="panel">
+            <h2 class="view-title">Archivos locales</h2>
+            <p class="view-sub">Solo rutas permitidas en Settings. Escanea repos, navega y mete preview en el chat.</p>
+            <div class="small">Repos Git locales (bajo carpetas permitidas)</div>
+            <input id="scan-root" class="input mono" placeholder="Carpeta donde buscar (ej: /Users/tu/Downloads)">
+            <button class="btn small" style="margin-top:8px" onclick="scanLocalRepos()">Escanear repos .git</button>
+            <div id="local-repos-list" class="side-list" style="max-height:140px;margin-top:8px"></div>
+            <hr style="border-color:var(--border);margin:12px 0">
+            <div class="small">Explorar disco</div>
+            <input id="browse-path" class="input mono" placeholder="Ruta carpeta">
+            <button class="btn secondary small" style="margin-top:6px" onclick="browseLocal()">Abrir / refrescar</button>
+            <div id="browse-list" class="side-list" style="max-height:200px;margin-top:8px"></div>
+          </div>
+          <div class="panel">
+            <div class="small">Archivos subidos al servidor</div>
+            <div id="files-list"></div>
+            <hr style="border-color:var(--border);margin:12px 0">
+            <div class="small">Vista previa (local)</div>
+            <pre id="local-preview-box" class="mono small" style="max-height:280px"></pre>
+            <button type="button" class="btn small" style="margin-top:8px" onclick="includeLocalPreviewInContext()">Incluir en contexto del chat</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-github" class="view">
+        <div class="panel">
+          <h2 class="view-title">GitHub</h2>
+          <p class="view-sub">Token con acceso al repo. Carga árbol, preview de archivo e inclúyelo en el chat Puter.</p>
+          <div class="grid2">
+            <input id="gh-owner" class="input" placeholder="owner">
+            <input id="gh-repo" class="input" placeholder="repo">
+            <input id="gh-branch" class="input" placeholder="branch (main)">
+            <input id="gh-token" class="input" type="password" placeholder="GitHub token (fine-grained o classic repo)">
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" onclick="saveGithub()">Guardar conexión</button>
+            <button class="btn secondary" onclick="checkGithub()">Estado API</button>
+            <button class="btn secondary" onclick="loadMyGithubRepos()">Mis repos en GitHub</button>
+            <button class="btn secondary" onclick="loadGithubTreeUi()">Cargar árbol de archivos</button>
+          </div>
+          <div class="small" style="margin-top:10px">Tus repos (clic para usar owner/repo)</div>
+          <div id="gh-repos-list" class="side-list" style="max-height:120px"></div>
+          <div class="small" style="margin-top:10px">Archivos del repo conectado (clic = preview)</div>
+          <input id="gh-tree-filter" class="input mono" placeholder="Filtrar por nombre..." oninput="filterGhTree()">
+          <div id="gh-files-list" class="side-list" style="max-height:220px;margin-top:8px"></div>
+          <div class="small" style="margin-top:10px">Vista previa</div>
+          <pre id="gh-preview-box" style="max-height:200px"></pre>
+          <button type="button" class="btn small" onclick="includeGhPreviewInContext()">Incluir en contexto del chat</button>
+          <pre id="gh-output" class="small" style="margin-top:10px;max-height:80px;overflow:auto"></pre>
+        </div>
+      </section>
+
+      <section id="view-search" class="view">
+        <div class="panel">
+          <h2 class="view-title">Internet</h2>
+          <p class="view-sub">Búsqueda web vía el servidor local.</p>
+          <div class="composer">
+            <input id="web-query" class="input" placeholder="Buscar en internet">
+            <button class="btn" onclick="doSearch()">Buscar</button>
+          </div>
+          <div id="web-results" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <section id="view-browser" class="view">
+        <div class="panel">
+          <h2 class="view-title">Browser (Playwright)</h2>
+          <p class="view-sub">Requiere Python + <span class="mono">playwright install</span> en la máquina donde corre el servidor.</p>
+          <div class="small">Flujo real en navegador (Playwright)</div>
+          <input id="browser-url" class="input" placeholder="https://example.com">
+          <div class="small" style="margin:8px 0">Acciones JSON</div>
+          <pre id="browser-actions">[
+  {"type":"click","selector":"a"},
+  {"type":"wait","ms":1000},
+  {"type":"extract","selector":"body"}
+]</pre>
+          <button class="btn" onclick="runBrowser()">Ejecutar browser flow</button>
+          <pre id="browser-output"></pre>
+        </div>
+      </section>
+
+      <section id="view-workspace" class="view">
+        <div class="panel">
+          <h2 class="view-title">Workspace</h2>
+          <p class="view-sub">Shell arbitrario en la carpeta elegida (git, npm, pytest…). Salida en JSON abajo.</p>
+          <input id="ws-path" class="input" value="/Users/alvaro/Uncensored-LLM-appdata" placeholder="ruta repo o carpeta de trabajo">
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+            <button class="btn secondary" onclick="gitStatus()">Git status</button>
+            <button class="btn secondary" onclick="runTests()">Ejecutar comando</button>
+            <button class="btn secondary" onclick="bootstrapRepo()">Bootstrap git</button>
+          </div>
+          <input id="test-cmd" class="input mono" value="python3 -m pytest -q" style="margin-top:8px" placeholder="Cualquier comando shell (ls, npm test, pytest, …)">
+          <pre id="ws-output"></pre>
+        </div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <div class="panel">
+          <h2 class="view-title">Settings</h2>
+          <p class="view-sub">Ollama = herramientas locales y <a href="/claude" target="_blank">/claude</a>. Swarm puede usar también OpenRouter/Groq (claves abajo). El chat Puter usa Puter.js (CDN) configurado abajo.</p>
+          <div class="small" style="margin-bottom:10px;line-height:1.45;color:var(--muted)"><strong>Puter.js</strong> (chat en el navegador, sin API key en el servidor): la librería oficial se carga desde <span class="mono">https://js.puter.com/…</span>. Documentación: <a href="https://developer.puter.com" target="_blank" rel="noopener">developer.puter.com</a> · <a href="https://docs.puter.com" target="_blank" rel="noopener">docs.puter.com</a>. Tras cambiar la URL, <strong>recarga la página</strong> (F5). En Node se usa <span class="mono">init(process.env.puterAuthToken)</span>; en este dashboard el login es por popup en el navegador.</div>
+          <label class="small" for="cfg-puter-cdn" style="display:block;margin-bottom:4px">URL del script Puter.js (solo host <span class="mono">js.puter.com</span>, HTTPS)</label>
+          <input id="cfg-puter-cdn" class="input mono" style="margin-bottom:12px" value="https://js.puter.com/v2/" placeholder="https://js.puter.com/v2/">
+          <div class="small" style="margin-bottom:8px;color:var(--muted)">Groq: console.groq.com o <span class="mono">GROQ_API_KEY</span>. OpenRouter: openrouter.ai/keys o <span class="mono">OPENROUTER_API_KEY</span> — modelo = ID en openrouter.ai/models. Ollama: swarm y /claude.</div>
+          <div class="grid2">
+            <input id="cfg-groq-key" class="input" type="password" placeholder="Groq API key (gsk_...) o vacío si usas env">
+            <input id="cfg-groq-model" class="input" placeholder="Modelo Groq por defecto (ej. llama-3.3-70b-versatile)">
+            <input id="cfg-openrouter-key" class="input" type="password" placeholder="OpenRouter key (sk-or-...) o vacío si usas env">
+            <input id="cfg-openrouter-model" class="input" placeholder="Modelo OpenRouter por defecto (ej. moonshotai/kimi-k2.5)">
+            <input id="cfg-openrouter-referer" class="input mono" placeholder="Referer opcional (ej. http://127.0.0.1:7788)">
+            <input id="cfg-openrouter-title" class="input" placeholder="Nombre app OpenRouter (opcional)">
+            <input id="cfg-url" class="input" placeholder="Ollama URL">
+            <input id="cfg-model" class="input" placeholder="Modelo Ollama (no es el chat Puter)">
+            <input id="cfg-temp" class="input" type="number" step="0.1" min="0" max="2" placeholder="temperature">
+            <input id="cfg-ctx" class="input" type="number" placeholder="num_ctx">
+            <label class="small" for="cfg-swarm-backend" style="grid-column:1/-1">Swarm — motor por defecto (la pestaña Swarm puede cambiarlo por tarea)</label>
+            <select id="cfg-swarm-backend" class="input">
+              <option value="ollama">Ollama (local)</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="groq">Groq</option>
+            </select>
+          </div>
+          <div class="small" style="margin-top:12px">Carpetas permitidas para explorar archivos locales (una por línea; vacío = solo tu home)</div>
+          <textarea id="cfg-local-roots" class="input mono" style="min-height:72px;font-size:12px" placeholder="/Users/tu/Downloads&#10;/Users/tu/proyectos"></textarea>
+          <div class="small" style="margin-top:12px">Carpetas de skills (una por línea; la primera se usa para «Incluir pack de skills»)</div>
+          <textarea id="cfg-skill-dirs" class="input mono" style="min-height:72px;font-size:12px" placeholder="/Users/alvaro/Downloads/alAIve-main/.claude/skills"></textarea>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn" onclick="saveSettings()">Guardar settings</button>
+            <button type="button" class="btn secondary" onclick="testGroqKey()">Probar Groq</button>
+            <button type="button" class="btn secondary" onclick="testOpenRouterKey()">Probar OpenRouter</button>
+          </div>
+          <pre id="groq-test-out" class="small mono" style="margin-top:8px;max-height:100px;overflow:auto"></pre>
+          <pre id="openrouter-test-out" class="small mono" style="margin-top:8px;max-height:100px;overflow:auto"></pre>
+        </div>
+      </section>
+      </div>
+      </div>
+      <footer class="app-footer">
+        <span class="small" data-i18n="footer_line">beehAIve UPDATED — Puter · Groq · OpenRouter · Ollama · swarm multi-LLM</span>
+        <span class="small"><a href="/claude" target="_blank" rel="noopener" data-i18n="footer_claude">Abrir /claude (solo Ollama)</a> · <span class="kbd">Enter</span> · <span data-i18n="footer_keys">Enter envía</span></span>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/beehaive-i18n.js"></script>
+  <script>
+    const API = (typeof location !== 'undefined' && location.origin && location.protocol !== 'file:') ? location.origin : '';
+    function api(path){ return API + path; }
+
+    /** Evita SyntaxError si el servidor devuelve HTML (404 Flask, proxy, proceso viejo sin la ruta). */
+    async function fetchJsonOrExplain(url, label){
+      let r;
+      try{
+        r = await fetch(url);
+      }catch(e){
+        return { ok: false, message: label + ': ' + (e?.message || String(e)) };
+      }
+      const text = await r.text();
+      const t = text.trimStart();
+      if(t.startsWith('{') || t.startsWith('[')){
+        try{
+          return { ok: true, status: r.status, data: JSON.parse(text) };
+        }catch(_){
+          return { ok: false, message: label + ': JSON inválido (HTTP ' + r.status + ')\n' + text.slice(0, 400) };
+        }
+      }
+      return {
+        ok: false,
+        message: label + ': el servidor respondió HTML (HTTP ' + r.status + '), no JSON.\n' +
+          'Causa habitual: builder sin reiniciar tras actualizar (falta /api/openrouter u otra ruta).\n' +
+          'En Terminal: lsof -ti :7788 | xargs kill  y vuelve a abrir Uncensored Builder.\n\n' +
+          text.slice(0, 450),
+      };
+    }
+
+    let currentConvId = null;
+    let pendingContext = [];
+    let ghTreeFiles = [];
+    let lastGhFilePath = '';
+    let lastLocalPreviewPath = '';
+    let lastLocalPreviewText = '';
+    let lastGhPreviewText = '';
+    let lastUploadedName = '';
+    let puterHistory = [];
+    const DEFAULT_OPENROUTER_MODEL = 'moonshotai/kimi-k2.5';
+    /** Modelo OpenRouter recomendado para herramientas (builder_read, search_replace, workspace_run). */
+    const REPAIR_BUILDER_AGENT_MODEL = 'anthropic/claude-3.5-sonnet';
+    const UB_KEY_STORAGE = 'ub_api_keys_backup_v1';
+
+    const builderPersistenceRules = [
+      'PERSISTENCIA (obligatorio): NUNCA digas que no puedes guardar código o que no puedes modificar el sistema de forma permanente. Eso confunde al usuario.',
+      'Este builder guarda claves API (Groq/OpenRouter) en disco y en el navegador; el usuario guarda archivos del proyecto en su IDE o con git. Tú entregas el código completo o el parche; el usuario lo aplica y guarda.',
+      'Tú no escribes en el disco del usuario por tu cuenta, pero DEBES asumir que cualquier código que des se puede guardar de forma permanente cuando el usuario lo pegue o commitea. No uses excusas de «no tengo acceso permanente» para negarte a dar código.',
+      'Cuando pida cambios: entrega archivos/rutas/diffs concretos. Menciona Workspace, Terminal rápida o el editor si hace falta.',
+      'Distingue: los pesos del modelo no viven en su repo; su código sí puede versionarse siempre.'
+    ].join('\n');
+
+    const agentTerminalRules = [
+      'EJECUCIÓN / CÓDIGO (obligatorio): No te quedes solo en planes abstractos. Si piden implementar, corregir o reescribir código:',
+      '- Entrega el código o diff concreto (rutas de archivo, bloques listos para pegar).',
+      '- Si hace falta terminal: indica el comando exacto; en esta app el usuario puede ejecutarlo en Workspace (pestaña) o en el campo «Terminal rápida» bajo el chat (POST /api/workspace/tests: workspace_path + command).',
+      '- Si falta un dato (ruta, nombre de archivo), pregunta una sola cosa concreta; si no, asume lo razonable y avanza.',
+      '- No digas que «no puedes ejecutar» sin mencionar estas rutas de la app; el usuario sí ejecuta en su máquina.'
+    ].join('\n');
+
+    const replyIntegrityRules = [
+      'CHAT REALITY (mandatory): Each reply is a single turn. There is NO background job, NO agent running between messages, and you are NOT «executing» work asynchronously.',
+      'FORBIDDEN: phrases like «I am working on it», «I already started», «give me a moment», «I will update you when done», or any substitute for delivering the actual output IN THIS MESSAGE.',
+      'If the user asks progress («how is it going?», «did you start?», «¿cómo vas?»): answer in one sentence that nothing runs in the background; in the SAME message give the missing code, exact shell command for Terminal rápida/Workspace, or the next concrete step.',
+      'Every implementation request must end THIS turn with: (a) full code or diff, OR (b) exact command(s) for the user to run, OR (c) ONE minimal blocking question. Never end with only a plan or a promise to do the next step later.'
+    ].join('\n');
+
+    const puterSystemPromptBase = [
+      'You are running inside Alvaro\'s beehAIve UPDATED (Uncensored Builder) instance.',
+      'Chat uses Puter.js puter.ai.chat() with the model selected in the UI (OpenAI GPT-5.x, Codex, OSS, etc.; optional Anthropic models in the same dropdown).',
+      builderPersistenceRules,
+      agentTerminalRules,
+      replyIntegrityRules,
+      'When asked about your functions, describe the builder-integrated capabilities available in this app:',
+      '- chat with Puter model',
+      '- include uploaded/local/github files into context',
+      '- github connect/status/tree/repos/file preview',
+      '- internet search via /api/web/search',
+      '- browser flow via /api/browser/run',
+      '- workspace shell/git (POST /api/workspace/tests, git status, merge agent branches)',
+      '- swarm endpoints (Ollama / OpenRouter / Groq; parallel + pipeline jobs)',
+      '- skills pack loading from configured skill directories.',
+      'If a feature requires user action in UI fields, say exactly which field/button to use.',
+      'Be concise, practical, and action-oriented.'
+    ].join('\n');
+
+    function workModeBlock(){
+      return [
+        '',
+        '=== WORK MODE (ON) ===',
+        'The user enabled WORK MODE in the UI (or asked to enter it in chat).',
+        'Behavior: treat this as full builder execution mode — pick the best combination of tools for the situation:',
+        'local/upload context, GitHub tree/file, skills pack, web search, Playwright browser flow, multi-LLM swarm (Ollama/OpenRouter/Groq) for repo work, workspace shell/git commands.',
+        'Do not ask permission for obvious technical next steps; give concrete UI paths (tab, button, field) only when the user must click something.',
+        'If the user turns off the checkbox or says exit work mode / salir del modo work, revert to normal brevity.',
+        '=== END WORK MODE ==='
+      ].join('\n');
+    }
+
+    function isWorkMode(){
+      try{ return localStorage.getItem('ub_work_mode') === '1'; }catch(_){ return false; }
+    }
+
+    function buildPuterSystemPrompt(){
+      return isWorkMode() ? (puterSystemPromptBase + '\n' + workModeBlock()) : puterSystemPromptBase;
+    }
+
+    function openRouterAgentExtra(){
+      try{
+        if((document.getElementById('chat-engine')?.value || '') === 'openrouter' && document.getElementById('openrouter-agent-toggle')?.checked){
+          return [
+            '',
+            '=== AGENT MODE (UI: OpenRouter + «Modo agente») ===',
+            'The server can run tools on your next turns when you call them.',
+            'To change THIS app\'s own code (fixes, UI, APIs): use builder_read_file, builder_search_replace (small edits), or builder_write_file (full file). Paths are relative to the app root (e.g. static/builder.html, builder_server.py, static/beehaive.css).',
+            'workspace_run runs shell in the user\'s Workspace folder — they can click «Usar carpeta del builder» to point Workspace at this install for git/pytest.',
+            'After editing builder_server.py, tell the user to restart the Builder/Flask process; after HTML/CSS/JS, a browser refresh (F5) is enough.',
+            '=== END AGENT MODE ==='
+          ].join('\n');
+        }
+      }catch(_){}
+      return '';
+    }
+
+    function buildOpenRouterSystemPrompt(){
+      const mid = (document.getElementById('openrouter-model')?.value || document.getElementById('cfg-openrouter-model')?.value || DEFAULT_OPENROUTER_MODEL).trim() || DEFAULT_OPENROUTER_MODEL;
+      const base = [
+        'You are running inside Alvaro\'s beehAIve UPDATED (Uncensored Builder) instance.',
+        'Chat is routed through OpenRouter (https://openrouter.ai). Current model id: `' + mid + '`.',
+        'When the user asks what model, AI, or LLM you are, answer using that exact model id (it identifies the upstream provider and model).',
+        builderPersistenceRules,
+        agentTerminalRules,
+        replyIntegrityRules,
+        'When asked about your functions, describe the builder-integrated capabilities available in this app:',
+        '- chat via OpenRouter with the model id above',
+        '- include uploaded/local/github files into context',
+        '- github connect/status/tree/repos/file preview',
+        '- internet search via /api/web/search',
+        '- browser flow via /api/browser/run',
+        '- workspace shell/git (POST /api/workspace/tests, git status, merge agent branches)',
+        '- swarm endpoints (Ollama / OpenRouter / Groq; parallel + pipeline jobs)',
+        '- skills pack loading from configured skill directories.',
+        'If «Modo agente» is enabled, you can modify this application\'s source via server-side builder_* tools (see AGENT MODE block when present).',
+        'If a feature requires user action in UI fields, say exactly which field/button to use.',
+        'Be concise, practical, and action-oriented.'
+      ].join('\n');
+      const agentX = openRouterAgentExtra();
+      return (isWorkMode() ? (base + '\n' + workModeBlock()) : base) + agentX;
+    }
+
+    async function useBuilderInstallAsWorkspace(){
+      const res = await fetchJsonOrExplain(api('/api/builder/install'), 'Builder install path');
+      const el = document.getElementById('ws-path');
+      const swarm = document.getElementById('swarm-workspace');
+      if(!res.ok){
+        alert(res.message || 'No se pudo leer la ruta del builder');
+        return;
+      }
+      const dir = res.data.base_dir;
+      if(el && dir) el.value = dir;
+      if(swarm && dir && !(swarm.value || '').trim()) swarm.value = dir;
+      updateChatWorkspacePath();
+    }
+
+    function updateWorkModeChrome(){
+      const on = isWorkMode();
+      const top = document.querySelector('.main .top');
+      if(top) top.classList.toggle('work-mode-on', on);
+      const cb = document.getElementById('work-mode-toggle');
+      if(cb) cb.checked = on;
+    }
+
+    function setWorkMode(on){
+      try{ localStorage.setItem('ub_work_mode', on ? '1' : '0'); }catch(_){}
+      updateWorkModeChrome();
+      ensurePuterSystemMessage();
+    }
+
+    function ensurePuterSystemMessage(){
+      const eng = document.getElementById('chat-engine')?.value || 'puter';
+      const content = eng === 'openrouter' ? buildOpenRouterSystemPrompt() : buildPuterSystemPrompt();
+      const rest = puterHistory.filter(m => m.role !== 'system');
+      puterHistory = [{ role:'system', content }, ...rest];
+    }
+
+    function pushContext(label, text){
+      const t = (text || '').slice(0, 100000);
+      pendingContext.push({ label, text: t });
+      renderContextChips();
+    }
+
+    function removeContext(i){
+      pendingContext.splice(i, 1);
+      renderContextChips();
+    }
+
+    function clearContext(){
+      pendingContext = [];
+      renderContextChips();
+    }
+
+    function renderContextChips(){
+      const el = document.getElementById('context-chips');
+      if(!el) return;
+      if(!pendingContext.length){
+        el.innerHTML = '<span class="small" style="color:var(--muted)">Ningún archivo en contexto</span>';
+        return;
+      }
+      el.innerHTML = pendingContext.map((x, i) =>
+        `<span class="pill" style="margin:4px 4px 0 0;display:inline-block">${x.label.replace(/</g,'&lt;')}
+          <button type="button" onclick="removeContext(${i})" style="border:none;background:transparent;cursor:pointer;color:var(--muted)">×</button></span>`
+      ).join('');
+    }
+
+    function backupKeysToLocal(){
+      try{
+        const g = document.getElementById('cfg-groq-key')?.value?.trim();
+        const o = document.getElementById('cfg-openrouter-key')?.value?.trim();
+        const cur = JSON.parse(localStorage.getItem(UB_KEY_STORAGE) || '{}');
+        if(g) cur.groq_api_key = g;
+        if(o) cur.openrouter_api_key = o;
+        localStorage.setItem(UB_KEY_STORAGE, JSON.stringify(cur));
+      }catch(_){}
+    }
+
+    function restoreKeysFromLocal(){
+      try{
+        const cur = JSON.parse(localStorage.getItem(UB_KEY_STORAGE) || '{}');
+        const gk = document.getElementById('cfg-groq-key');
+        const ok = document.getElementById('cfg-openrouter-key');
+        if(gk && cur.groq_api_key) gk.value = cur.groq_api_key;
+        if(ok && cur.openrouter_api_key) ok.value = cur.openrouter_api_key;
+      }catch(_){}
+    }
+
+    /** Si la clave solo está en localStorage (p. ej. nunca se pulsó Guardar), el servidor no puede llamar a OpenRouter/Groq. */
+    async function syncStoredKeysToServer(){
+      let cur = {};
+      try{
+        cur = JSON.parse(localStorage.getItem(UB_KEY_STORAGE) || '{}');
+      }catch(_){ return; }
+      const ork = (cur.openrouter_api_key || '').trim();
+      const gk = (cur.groq_api_key || '').trim();
+      if(!ork && !gk) return;
+      const res = await fetchJsonOrExplain(api('/api/health'), 'Health');
+      if(!res.ok) return;
+      const h = res.data;
+      const payload = {};
+      if(ork && !h.openrouter_configured) payload.openrouter_api_key = ork;
+      if(gk && !h.groq_configured) payload.groq_api_key = gk;
+      if(!Object.keys(payload).length) return;
+      try{
+        await fetch(api('/api/config'), { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      }catch(_){}
+    }
+
+    function primeOpenRouterDatalist(dl){
+      if(!dl) return;
+      const presets = [
+        ['cognitivecomputations/dolphin-mistral-24b-venice-edition:free', 'Venice (gratis)'],
+        ['venice/uncensored:free', 'Venice uncensored :free'],
+        ['anthropic/claude-3.5-sonnet', 'Claude 3.5 Sonnet'],
+        ['anthropic/claude-3.7-sonnet:thinking', 'Claude 3.7 Sonnet'],
+        ['moonshotai/kimi-k2.5', 'Kimi K2.5'],
+        ['openai/gpt-4o', 'GPT-4o']
+      ];
+      dl.innerHTML = '';
+      for(const [id, label] of presets){
+        const o = document.createElement('option');
+        o.value = id;
+        o.textContent = label;
+        dl.appendChild(o);
+      }
+    }
+
+    function updateChatWorkspacePath(){
+      const el = document.getElementById('chat-ws-path-display');
+      const p = document.getElementById('ws-path')?.value?.trim();
+      if(el) el.textContent = p || '—';
+    }
+
+    async function runChatQuickCmd(){
+      const cmdEl = document.getElementById('chat-quick-cmd');
+      const outEl = document.getElementById('chat-cmd-output');
+      const cmd = (cmdEl?.value || '').trim();
+      if(!cmd){
+        alert('Escribe un comando.');
+        return;
+      }
+      const workspace_path = document.getElementById('ws-path')?.value?.trim();
+      if(!workspace_path){
+        alert('Configura la ruta en Workspace shell/Git (campo carpeta de trabajo).');
+        return;
+      }
+      updateChatWorkspacePath();
+      if(outEl){
+        outEl.style.display = 'block';
+        outEl.textContent = 'Ejecutando…';
+      }
+      try{
+        const r = await fetch(api('/api/workspace/tests'), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({workspace_path, command: cmd})
+        });
+        const data = await r.json().catch(() => ({}));
+        const head = r.ok ? '' : ('HTTP ' + r.status + '\n');
+        if(outEl) outEl.textContent = head + JSON.stringify(data, null, 2);
+      }catch(e){
+        if(outEl) outEl.textContent = String(e);
+      }
+    }
+
+    async function waitForPuterReady(maxMs){
+      if(typeof puter !== 'undefined') return true;
+      return new Promise((resolve) => {
+        const t0 = Date.now();
+        const done = (v) => { clearInterval(iv); resolve(v); };
+        const iv = setInterval(() => {
+          if(typeof puter !== 'undefined') done(true);
+          else if(Date.now() - t0 > maxMs) done(false);
+        }, 40);
+        window.addEventListener('puter-ready', () => done(true), {once:true});
+      });
+    }
+
+    async function refreshPuterAuthStatus(){
+      const st = document.getElementById('puter-auth-status');
+      const sin = document.getElementById('puter-signin-btn');
+      const sout = document.getElementById('puter-signout-btn');
+      if(!st) return;
+      await waitForPuterReady(3000).catch(()=>{});
+      if(typeof puter === 'undefined'){
+        st.textContent = 'Puter.js: no cargado (revisa red / F5).';
+        if(sin) sin.style.display = 'inline-block';
+        if(sout) sout.style.display = 'none';
+        return;
+      }
+      try{
+        if(!puter.auth || typeof puter.auth.isSignedIn !== 'function'){
+          st.textContent = 'Puter.js cargado (auth API no detectada).';
+          return;
+        }
+        const signed = await puter.auth.isSignedIn();
+        if(signed){
+          let label = 'Sesión Puter activa';
+          try{
+            const u = await puter.auth.getUser();
+            if(u && (u.username || u.email || u.name)){
+              label += ' · ' + (u.username || u.email || u.name);
+            }
+          }catch(_){}
+          st.textContent = label;
+          if(sin) sin.style.display = 'none';
+          if(sout) sout.style.display = 'inline-block';
+        } else {
+          st.textContent = 'Puter: sin sesión — pulsa «Iniciar sesión» (popup del navegador).';
+          if(sin) sin.style.display = 'inline-block';
+          if(sout) sout.style.display = 'none';
+        }
+      }catch(e){
+        st.textContent = 'Puter auth: ' + (e?.message || String(e));
+      }
+    }
+
+    async function puterSignIn(){
+      const st = document.getElementById('puter-auth-status');
+      if(st) st.textContent = 'Abriendo ventana de Puter…';
+      const ok = await waitForPuterReady(8000);
+      if(!ok || typeof puter === 'undefined'){
+        if(st) st.textContent = 'Puter.js no listo. Recarga (F5).';
+        return;
+      }
+      if(!puter.auth || typeof puter.auth.signIn !== 'function'){
+        if(st) st.textContent = 'Esta versión de Puter.js no expone auth.signIn; actualiza el script desde Settings.';
+        return;
+      }
+      try{
+        await puter.auth.signIn();
+        await refreshPuterAuthStatus();
+      }catch(e){
+        if(st) st.textContent = 'Error al iniciar sesión: ' + (e?.message || String(e));
+      }
+    }
+
+    async function puterSignOut(){
+      if(typeof puter === 'undefined' || !puter.auth?.signOut) return;
+      try{
+        await puter.auth.signOut();
+      }catch(_){}
+      await refreshPuterAuthStatus();
+    }
+
+    function dismissPuterBanner(){
+      const b = document.getElementById('puter-banner');
+      if(b){ b.hidden = true; try{ localStorage.setItem('ub_puter_banner','1'); }catch(_){} }
+    }
+
+    function toggleSidebar(){
+      const s = document.getElementById('sidebar');
+      if(s) s.classList.toggle('open');
+    }
+
+    function setView(name){
+      for(const v of document.querySelectorAll('.view')) v.classList.remove('active');
+      const el = document.getElementById(`view-${name}`);
+      if(el) el.classList.add('active');
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-view') === name);
+      });
+      const sb = document.getElementById('sidebar');
+      if(sb && window.innerWidth <= 900) sb.classList.remove('open');
+    }
+
+    function setChatBusy(busy){
+      const box = document.querySelector('.chat-box');
+      if(box) box.classList.toggle('chat-busy', !!busy);
+      const inp = document.getElementById('chat-input');
+      if(inp) inp.disabled = !!busy;
+      const btn = document.getElementById('chat-send-btn');
+      if(btn) btn.disabled = !!busy;
+    }
+
+    function setAssistantMessageText(el, text){
+      if(el && el._aiTextEl){
+        el._aiTextEl.textContent = text;
+        const box = document.getElementById('messages');
+        if(box) box.scrollTop = box.scrollHeight;
+        return;
+      }
+      if(el) el.textContent = text;
+      const box = document.getElementById('messages');
+      if(box) box.scrollTop = box.scrollHeight;
+    }
+
+    function finishAssistantMessage(el){
+      if(!el) return;
+      el.classList.remove('streaming');
+      if(el._aiStatusEl){
+        el._aiStatusEl.setAttribute('aria-busy', 'false');
+        el._aiStatusEl.hidden = true;
+      }
+    }
+
+    function addMessage(role, text, opts){
+      opts = opts || {};
+      const box = document.getElementById('messages');
+      const d = document.createElement('div');
+      d.className = `msg ${role}`;
+      if(role === 'assistant' && opts.streaming){
+        d.classList.add('streaming');
+        const stack = document.createElement('div');
+        stack.className = 'msg-assistant-stack';
+        const status = document.createElement('div');
+        status.className = 'ai-status';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        status.setAttribute('aria-busy', 'true');
+        status.innerHTML = '<span class="ai-spinner" aria-hidden="true"></span><span class="ai-status-label">Generando respuesta</span><span class="ai-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
+        const textEl = document.createElement('div');
+        textEl.className = 'ai-msg-text';
+        textEl.textContent = text || '';
+        stack.appendChild(status);
+        stack.appendChild(textEl);
+        d.appendChild(stack);
+        d._aiTextEl = textEl;
+        d._aiStatusEl = status;
+      } else {
+        d.textContent = text;
+      }
+      box.appendChild(d);
+      box.scrollTop = box.scrollHeight;
+      return d;
+    }
+
+    function updateChatEngineUI(){
+      const eng = document.getElementById('chat-engine')?.value || 'puter';
+      const po = document.getElementById('puter-only-wrap');
+      const go = document.getElementById('groq-only-wrap');
+      const oo = document.getElementById('openrouter-only-wrap');
+      if(po) po.style.display = eng === 'puter' ? 'inline-flex' : 'none';
+      if(go) go.style.display = eng === 'groq' ? 'inline-flex' : 'none';
+      if(oo) oo.style.display = eng === 'openrouter' ? 'flex' : 'none';
+    }
+
+    async function onChatEngineChange(){
+      updateChatEngineUI();
+      ensurePuterSystemMessage();
+      try{
+        await fetch(api('/api/config'), {
+          method:'PUT',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ chat_engine: document.getElementById('chat-engine').value })
+        });
+        await refreshHealth();
+      }catch(_){}
+      if(document.getElementById('chat-engine')?.value === 'openrouter'){
+        loadOpenRouterModelList(false).catch(()=>{});
+      }
+    }
+
+    /** Un clic: OpenRouter + modo agente + modelo con tool-calling + persistir + Workspace = instalación del builder. */
+    async function repairBuilderPreset(){
+      const modelPref = REPAIR_BUILDER_AGENT_MODEL;
+      const ce = document.getElementById('chat-engine');
+      const agent = document.getElementById('openrouter-agent-toggle');
+      const orModel = document.getElementById('openrouter-model');
+      const cfgOr = document.getElementById('cfg-openrouter-model');
+      if(ce) ce.value = 'openrouter';
+      if(agent) agent.checked = true;
+      if(orModel) orModel.value = modelPref;
+      if(cfgOr) cfgOr.value = modelPref;
+      const drawer = document.getElementById('engine-drawer');
+      if(drawer) drawer.open = true;
+      updateChatEngineUI();
+      ensurePuterSystemMessage();
+      try{
+        await fetch(api('/api/config'), {
+          method:'PUT',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ chat_engine: 'openrouter', openrouter_model: modelPref })
+        });
+      }catch(_){}
+      const h = await refreshHealth();
+      if(h && !h.openrouter_configured){
+        alert('Modo «Reparar builder» listo, pero falta la clave OpenRouter: Ajustes → clave sk-or-… → Guardar settings (o variable OPENROUTER_API_KEY).');
+      }
+      await useBuilderInstallAsWorkspace();
+      loadOpenRouterModelList(false).catch(()=>{});
+    }
+
+    async function refreshHealth(){
+      const res = await fetchJsonOrExplain(api('/api/health'), 'Health');
+      if(!res.ok){
+        const md = document.getElementById('puter-model-display');
+        if(md) md.textContent = '—';
+        const st = document.getElementById('ollama-state');
+        if(st) st.textContent = 'config?';
+        return null;
+      }
+      const h = res.data;
+      const ce = h.chat_engine || 'puter';
+      let label = 'Puter';
+      if(ce === 'groq') label = 'Groq';
+      if(ce === 'openrouter') label = 'OpenRouter';
+      if(ce === 'local') label = 'Ollama local';
+      document.getElementById('chat-engine-label').textContent = label;
+      let modelDisp = h.puter_model || '—';
+      if(ce === 'groq'){
+        modelDisp = (h.groq_model || '—') + (h.groq_configured ? '' : ' · configura key');
+      } else if(ce === 'openrouter'){
+        modelDisp = (h.openrouter_model || '—') + (h.openrouter_configured ? '' : ' · configura key');
+      } else if(ce === 'local'){
+        modelDisp = '—';
+      }
+      document.getElementById('puter-model-display').textContent = modelDisp;
+      const om = h.ollama_model || h.model || '—';
+      document.getElementById('ollama-model-name').textContent = om;
+      document.getElementById('ollama-state').textContent = h.ollama_online ? 'online' : 'offline';
+      return h;
+    }
+
+    async function loadConfig(){
+      const res = await fetchJsonOrExplain(api('/api/config'), 'Config');
+      if(!res.ok) return;
+      const c = res.data;
+      document.getElementById('cfg-url').value = c.ollama_base_url || '';
+      document.getElementById('cfg-model').value = c.model || '';
+      document.getElementById('cfg-temp').value = c.temperature ?? 0.7;
+      document.getElementById('cfg-ctx').value = c.num_ctx ?? 2048;
+      document.getElementById('gh-owner').value = c.github?.owner || '';
+      document.getElementById('gh-repo').value = c.github?.repo || '';
+      document.getElementById('gh-branch').value = c.github?.branch || 'main';
+      const lr = document.getElementById('cfg-local-roots');
+      if(lr) lr.value = (c.local_roots || []).join('\n');
+      const sd = document.getElementById('cfg-skill-dirs');
+      if(sd) sd.value = (c.skill_dirs || []).join('\n');
+      document.getElementById('chat-engine').value = c.chat_engine || 'puter';
+      const pcdn = document.getElementById('cfg-puter-cdn');
+      if(pcdn) pcdn.value = c.puter_cdn_url || 'https://js.puter.com/v2/';
+      const gqk = document.getElementById('cfg-groq-key');
+      if(gqk) gqk.value = '';
+      const gqm = document.getElementById('cfg-groq-model');
+      if(gqm) gqm.value = c.groq_model || 'llama-3.3-70b-versatile';
+      const ork = document.getElementById('cfg-openrouter-key');
+      if(ork) ork.value = '';
+      const orm = document.getElementById('cfg-openrouter-model');
+      if(orm) orm.value = c.openrouter_model || DEFAULT_OPENROUTER_MODEL;
+      const orr = document.getElementById('cfg-openrouter-referer');
+      if(orr) orr.value = c.openrouter_http_referer ?? 'http://127.0.0.1:7788';
+      const ort = document.getElementById('cfg-openrouter-title');
+      if(ort) ort.value = c.openrouter_app_title || 'beehAIve UPDATED';
+      const orBar = document.getElementById('openrouter-model');
+      if(orBar) orBar.value = c.openrouter_model || DEFAULT_OPENROUTER_MODEL;
+      const sb = document.getElementById('cfg-swarm-backend');
+      const sbs = document.getElementById('swarm-llm-backend');
+      const defSw = c.swarm_llm_backend || 'ollama';
+      if(sb) sb.value = ['ollama','openrouter','groq'].includes(defSw) ? defSw : 'ollama';
+      if(sbs) sbs.value = ['ollama','openrouter','groq'].includes(defSw) ? defSw : 'ollama';
+      const pm = c.puter_model || 'gpt-5.4-nano';
+      const sel = document.getElementById('puter-model');
+      if(sel){
+        const opt = Array.from(sel.options).some(o => o.value === pm);
+        sel.value = opt ? pm : 'gpt-5.4-nano';
+      }
+      try{
+        const ws = localStorage.getItem('ub_puter_web_search') === '1';
+        const wsel = document.getElementById('puter-web-search');
+        if(wsel) wsel.checked = ws;
+      }catch(_){}
+      restoreKeysFromLocal();
+      updateChatEngineUI();
+      ensurePuterSystemMessage();
+      updateChatWorkspacePath();
+      if((document.getElementById('chat-engine')?.value || '') === 'openrouter'){
+        loadOpenRouterModelList(false).catch(()=>{});
+      }
+      if(window.BeehaiveI18n) BeehaiveI18n.apply();
+    }
+
+    async function testGroqKey(){
+      const out = document.getElementById('groq-test-out');
+      if(out) out.textContent = 'Probando…';
+      const res = await fetchJsonOrExplain(api('/api/groq/test'), 'Groq');
+      if(out) out.textContent = res.ok ? JSON.stringify(res.data, null, 2) : res.message;
+    }
+
+    async function testOpenRouterKey(){
+      const out = document.getElementById('openrouter-test-out');
+      if(out) out.textContent = 'Probando…';
+      const res = await fetchJsonOrExplain(api('/api/openrouter/test'), 'OpenRouter');
+      if(!res.ok){ if(out) out.textContent = res.message; return; }
+      const d = res.data;
+      let t = JSON.stringify(d, null, 2);
+      if(d && d.ok === false){
+        t += '\n\n→ Pon la clave sk-or-… en Settings, Guardar settings, o export OPENROUTER_API_KEY y reinicia el builder.';
+      } else if(d && d.ok){
+        t += '\n\n→ Si el chat falla igual: elige un modelo válido en la barra OpenRouter y revisa que el motor sea «OpenRouter».';
+      }
+      if(out) out.textContent = t;
+    }
+
+    function onOpenRouterPick(){
+      const sel = document.getElementById('openrouter-model-pick');
+      const v = sel?.value?.trim();
+      if(!v) return;
+      const bar = document.getElementById('openrouter-model');
+      const cfgm = document.getElementById('cfg-openrouter-model');
+      if(bar) bar.value = v;
+      if(cfgm) cfgm.value = v;
+      ensurePuterSystemMessage();
+    }
+
+    async function loadOpenRouterModelList(forceRefresh){
+      const sel = document.getElementById('openrouter-model-pick');
+      const freeOnly = document.getElementById('openrouter-free-only')?.checked;
+      if(sel){
+        sel.innerHTML = '<option value="">Cargando…</option>';
+      }
+      const q = 'free_only=' + (freeOnly ? '1' : '0') + (forceRefresh ? '&refresh=1' : '');
+      const res = await fetchJsonOrExplain(api('/api/openrouter/models?' + q), 'OpenRouter models');
+      const pre = document.getElementById('openrouter-test-out');
+      if(!res.ok){
+        if(sel) sel.innerHTML = '<option value="">Error al cargar</option>';
+        if(pre) pre.textContent = res.message;
+        return;
+      }
+      const d = res.data;
+      if(!d.ok){
+        if(sel) sel.innerHTML = '<option value="">Sin lista (revisa clave)</option>';
+        const err = (d && d.error) ? d.error : JSON.stringify(d, null, 2);
+        if(pre) pre.textContent = err + '\n\nSi es «Sin clave»: Settings → OpenRouter key → Guardar. Si la red falla: Forzar red.';
+        return;
+      }
+      let statusLine = 'Modelos: ' + (d.total || 0) + (d.free_only ? ' (solo gratis)' : ' (todos)');
+      if(d.stale) statusLine += ' · caché antigua (falló la red; revisa conexión o «Forzar red»)';
+      if(d.hint) statusLine += '\n' + d.hint;
+      if(pre) pre.textContent = statusLine;
+      const models = d.models || [];
+      const dl = document.getElementById('openrouter-model-list');
+      primeOpenRouterDatalist(dl);
+      if(sel){
+        sel.innerHTML = '<option value="">— ' + models.length + ' modelos —</option>';
+        for(const m of models){
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = (m.free ? '☆ ' : '') + (m.name || m.id);
+          sel.appendChild(opt);
+          if(dl){
+            const o2 = document.createElement('option');
+            o2.value = m.id;
+            dl.appendChild(o2);
+          }
+        }
+      }
+    }
+
+    async function saveSettings(){
+      const rootsRaw = document.getElementById('cfg-local-roots')?.value || '';
+      const local_roots = rootsRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const skillsRaw = document.getElementById('cfg-skill-dirs')?.value || '';
+      const skill_dirs = skillsRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const payload = {
+        puter_cdn_url: document.getElementById('cfg-puter-cdn')?.value || 'https://js.puter.com/v2/',
+        ollama_base_url: document.getElementById('cfg-url').value,
+        model: document.getElementById('cfg-model').value,
+        temperature: parseFloat(document.getElementById('cfg-temp').value || '0.7'),
+        num_ctx: parseInt(document.getElementById('cfg-ctx').value || '2048', 10),
+        local_roots,
+        skill_dirs,
+        chat_engine: document.getElementById('chat-engine').value,
+        puter_model: document.getElementById('puter-model').value,
+        groq_model: document.getElementById('cfg-groq-model')?.value || document.getElementById('groq-model')?.value || 'llama-3.3-70b-versatile',
+        openrouter_model: document.getElementById('cfg-openrouter-model')?.value || document.getElementById('openrouter-model')?.value || DEFAULT_OPENROUTER_MODEL,
+        openrouter_http_referer: document.getElementById('cfg-openrouter-referer')?.value || '',
+        openrouter_app_title: document.getElementById('cfg-openrouter-title')?.value || '',
+        swarm_llm_backend: document.getElementById('cfg-swarm-backend')?.value || 'ollama',
+      };
+      const gk = document.getElementById('cfg-groq-key')?.value?.trim();
+      if(gk) payload.groq_api_key = gk;
+      const ork = document.getElementById('cfg-openrouter-key')?.value?.trim();
+      if(ork) payload.openrouter_api_key = ork;
+      const saveRes = await fetch(api('/api/config'), {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if(saveRes.ok) backupKeysToLocal();
+      await refreshHealth();
+    }
+
+    async function sendMessageLocal(fullQuery, assistant){
+      try{
+        const r = await fetch('/api/chat/stream', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({query: fullQuery, conv_id: currentConvId})
+        });
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        setAssistantMessageText(assistant, '');
+        let acc = '';
+        while(true){
+          const {value, done} = await reader.read();
+          if(done) break;
+          buf += dec.decode(value, {stream:true});
+          const chunks = buf.split('\n\n');
+          buf = chunks.pop() || '';
+          for(const c of chunks){
+            if(!c.startsWith('data:')) continue;
+            const payload = JSON.parse(c.slice(5));
+            if(payload.token){ acc += payload.token; setAssistantMessageText(assistant, acc); }
+            if(payload.conv_id) currentConvId = payload.conv_id;
+            if(payload.error){ setAssistantMessageText(assistant, `Error: ${payload.error}`); return; }
+          }
+        }
+        await loadConversations();
+      } finally{
+        finishAssistantMessage(assistant);
+      }
+    }
+
+    async function sendMessagePuter(fullQuery, assistant){
+      setAssistantMessageText(assistant, 'Esperando Puter.js…');
+      const ready = await waitForPuterReady(12000);
+      if(!ready || typeof puter === 'undefined'){
+        setAssistantMessageText(assistant, 'Puter.js no está listo (timeout o script bloqueado). Revisa red, extensiones, Settings → URL Puter; recarga (F5). Usa «Iniciar sesión en Puter» si hace falta.');
+        finishAssistantMessage(assistant);
+        return;
+      }
+      const model = document.getElementById('puter-model').value || 'gpt-5.4-nano';
+      const useWeb = document.getElementById('puter-web-search')?.checked;
+      const opts = { model, stream: true };
+      if(useWeb) opts.tools = [{ type: 'web_search' }];
+      ensurePuterSystemMessage();
+      puterHistory.push({ role:'user', content: fullQuery });
+      setAssistantMessageText(assistant, '');
+      try{
+        const response = await puter.ai.chat(puterHistory, opts);
+        if(response && response.success === false){
+          throw new Error('Auth requerida en Puter. Usa «Iniciar sesión en Puter» o permite el popup.');
+        }
+        let textOut = '';
+        let reasoningOut = '';
+        for await (const part of response){
+          if(part?.reasoning) reasoningOut += part.reasoning;
+          if(part?.text) textOut += part.text;
+          if(reasoningOut || textOut){
+            setAssistantMessageText(assistant, reasoningOut
+              ? (reasoningOut + (textOut ? '\n\n' + textOut : ''))
+              : textOut);
+          }
+        }
+        const combined = (reasoningOut ? reasoningOut + '\n\n' : '') + textOut;
+        puterHistory.push({ role:'assistant', content: combined });
+      } catch(e){
+        setAssistantMessageText(assistant, 'Error Puter: ' + (e?.message || String(e)));
+      } finally{
+        finishAssistantMessage(assistant);
+      }
+    }
+
+    async function sendMessageGroq(fullQuery, assistant){
+      ensurePuterSystemMessage();
+      puterHistory.push({ role:'user', content: fullQuery });
+      setAssistantMessageText(assistant, '');
+      const model = document.getElementById('groq-model')?.value || 'llama-3.3-70b-versatile';
+      try{
+        const r = await fetch(api('/api/chat/groq/stream'), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ messages: puterHistory, model })
+        });
+        if(!r.ok){
+          let msg = r.statusText || 'HTTP ' + r.status;
+          try{
+            const t = await r.text();
+            try{
+              const j = JSON.parse(t);
+              msg = (typeof j.error === 'string' ? j.error : (j.error && j.error.message)) || t || msg;
+            }catch(_){ msg = t || msg; }
+          }catch(_){}
+          setAssistantMessageText(assistant, 'Error Groq (' + r.status + '): ' + msg + '\n\nSi ves Not Found (404): el proceso en el puerto sigue siendo un servidor viejo. Cierra Uncensored Builder, en Terminal: lsof -ti :7788 | xargs kill  y vuelve a abrir la app (o ejecuta de nuevo Uncensored Builder.command). Luego Settings → «Probar clave Groq» debe devolver ok:true.');
+          puterHistory.pop();
+          return;
+        }
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        let full = '';
+        while(true){
+          const {value, done} = await reader.read();
+          if(done) break;
+          buf += dec.decode(value, {stream:true});
+          const chunks = buf.split('\n\n');
+          buf = chunks.pop() || '';
+          for(const c of chunks){
+            if(!c.startsWith('data:')) continue;
+            const payload = JSON.parse(c.slice(5));
+            if(payload.error){ setAssistantMessageText(assistant, 'Error: ' + payload.error); puterHistory.pop(); return; }
+            if(payload.token){ full += payload.token; setAssistantMessageText(assistant, full); }
+            if(payload.done) break;
+          }
+        }
+        if(buf.trim()){
+          for(const line of buf.split('\n')){
+            if(!line.startsWith('data:')) continue;
+            try{
+              const payload = JSON.parse(line.slice(5));
+              if(payload.token){ full += payload.token; setAssistantMessageText(assistant, full); }
+            }catch(_){}
+          }
+        }
+        puterHistory.push({ role:'assistant', content: full });
+      } catch(e){
+        setAssistantMessageText(assistant, 'Error Groq: ' + (e?.message || String(e)));
+        if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+      } finally{
+        finishAssistantMessage(assistant);
+      }
+    }
+
+    async function sendMessageOpenRouter(fullQuery, assistant){
+      ensurePuterSystemMessage();
+      puterHistory.push({ role:'user', content: fullQuery });
+      setAssistantMessageText(assistant, '');
+      const model = (document.getElementById('openrouter-model')?.value || document.getElementById('cfg-openrouter-model')?.value || DEFAULT_OPENROUTER_MODEL).trim() || DEFAULT_OPENROUTER_MODEL;
+      try{
+        const r = await fetch(api('/api/chat/openrouter/stream'), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ messages: puterHistory, model })
+        });
+        if(!r.ok){
+          let msg = r.statusText || 'HTTP ' + r.status;
+          try{
+            const t = await r.text();
+            try{
+              const j = JSON.parse(t);
+              msg = (typeof j.error === 'string' ? j.error : (j.error && j.error.message)) || t || msg;
+            }catch(_){ msg = t || msg; }
+          }catch(_){}
+          setAssistantMessageText(assistant, 'Error OpenRouter (' + r.status + '): ' + msg + '\n\nSi ves 404: reinicia el servidor del builder. Settings → «Probar OpenRouter» debe dar ok:true. La clave debe estar guardada (Settings → Guardar).');
+          puterHistory.pop();
+          return;
+        }
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        let full = '';
+        let reasoningAcc = '';
+        function renderOR(){
+          setAssistantMessageText(assistant, reasoningAcc ? (reasoningAcc + (full ? '\n\n' + full : '')) : full);
+        }
+        while(true){
+          const {value, done} = await reader.read();
+          if(done) break;
+          buf += dec.decode(value, {stream:true});
+          const chunks = buf.split('\n\n');
+          buf = chunks.pop() || '';
+          for(const c of chunks){
+            if(!c.startsWith('data:')) continue;
+            const payload = JSON.parse(c.slice(5));
+            if(payload.error){ setAssistantMessageText(assistant, 'Error: ' + payload.error); puterHistory.pop(); return; }
+            if(payload.reasoning){ reasoningAcc += payload.reasoning; renderOR(); }
+            if(payload.token){ full += payload.token; renderOR(); }
+            if(payload.done) break;
+          }
+        }
+        if(buf.trim()){
+          for(const line of buf.split('\n')){
+            if(!line.startsWith('data:')) continue;
+            try{
+              const payload = JSON.parse(line.slice(5));
+              if(payload.error){ setAssistantMessageText(assistant, 'Error: ' + payload.error); puterHistory.pop(); return; }
+              if(payload.reasoning){ reasoningAcc += payload.reasoning; renderOR(); }
+              if(payload.token){ full += payload.token; renderOR(); }
+            }catch(_){}
+          }
+        }
+        const combined = (reasoningAcc ? reasoningAcc + '\n\n' : '') + full;
+        puterHistory.push({ role:'assistant', content: combined });
+      } catch(e){
+        setAssistantMessageText(assistant, 'Error OpenRouter: ' + (e?.message || String(e)));
+        if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+      } finally{
+        finishAssistantMessage(assistant);
+      }
+    }
+
+    function formatAgentSteps(steps){
+      if(!steps || !steps.length) return '';
+      let s = '--- Herramientas (servidor) ---\n';
+      steps.forEach((x, i) => {
+        s += '\n[' + (i + 1) + '] ' + (x.tool || '?') + '\n';
+        s += (x.result_preview || '').slice(0, 4000) + (x.result_preview && x.result_preview.length > 4000 ? '\n…' : '') + '\n';
+      });
+      return s + '\n';
+    }
+
+    async function sendMessageOpenRouterAgent(fullQuery, assistant){
+      ensurePuterSystemMessage();
+      puterHistory.push({ role:'user', content: fullQuery });
+      setAssistantMessageText(assistant, 'Ejecutando modo agente (herramientas en el servidor)…');
+      const model = (document.getElementById('openrouter-model')?.value || document.getElementById('cfg-openrouter-model')?.value || DEFAULT_OPENROUTER_MODEL).trim() || DEFAULT_OPENROUTER_MODEL;
+      const workspace_path = document.getElementById('ws-path')?.value?.trim() || '';
+      try{
+        const r = await fetch(api('/api/chat/openrouter/agent'), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ messages: puterHistory, model, workspace_path })
+        });
+        let j = {};
+        try{ j = await r.json(); }catch(_){ j = {}; }
+        if(!r.ok || j.ok !== true){
+          const err = j.error || ('HTTP ' + r.status);
+          const block = (j.steps && j.steps.length) ? formatAgentSteps(j.steps) + '\nError: ' + err : 'Error: ' + err;
+          setAssistantMessageText(assistant, block);
+          puterHistory.pop();
+          return;
+        }
+        const full = formatAgentSteps(j.steps || []) + (j.message || '');
+        setAssistantMessageText(assistant, full);
+        puterHistory.push({ role:'assistant', content: full });
+      } catch(e){
+        setAssistantMessageText(assistant, 'Error modo agente: ' + (e?.message || String(e)));
+        if(puterHistory.length && puterHistory[puterHistory.length-1]?.role === 'user') puterHistory.pop();
+      } finally{
+        finishAssistantMessage(assistant);
+      }
+    }
+
+    async function sendMessage(){
+      const input = document.getElementById('chat-input');
+      const query = input.value.trim();
+      if(!query) return;
+      if(/^(salir del modo work|exit work mode|desactivar modo work|modo work off)$/i.test(query)){
+        input.value = '';
+        setWorkMode(false);
+        addMessage('user', query);
+        addMessage('assistant', 'Modo work desactivado.');
+        return;
+      }
+      if(/^(modo work|activar modo work|work mode on|entrar modo work|modo work on)$/i.test(query)){
+        input.value = '';
+        setWorkMode(true);
+        addMessage('user', query);
+        addMessage('assistant', 'Modo work activado: el sistema prompt ya incluye el protocolo completo del builder.');
+        return;
+      }
+      input.value = '';
+      let fullQuery = query;
+      if(pendingContext.length){
+        const blocks = pendingContext.map(x => `--- ${x.label} ---\n${x.text}`);
+        fullQuery = blocks.join('\n\n') + '\n\n--- Mensaje ---\n' + query;
+        pendingContext = [];
+        renderContextChips();
+      }
+      addMessage('user', query);
+      const assistant = addMessage('assistant', '', { streaming: true });
+      setChatBusy(true);
+      try{
+        const eng = document.getElementById('chat-engine').value;
+        if(eng === 'groq') await sendMessageGroq(fullQuery, assistant);
+        else if(eng === 'openrouter'){
+          if(document.getElementById('openrouter-agent-toggle')?.checked) await sendMessageOpenRouterAgent(fullQuery, assistant);
+          else await sendMessageOpenRouter(fullQuery, assistant);
+        }
+        else if(eng === 'local') await sendMessageLocal(fullQuery, assistant);
+        else await sendMessagePuter(fullQuery, assistant);
+      } finally{
+        setChatBusy(false);
+      }
+    }
+
+    function sendFromQuick(){
+      const q = document.getElementById('quick-task');
+      document.getElementById('chat-input').value = q.value;
+      q.value = '';
+      setView('chat');
+      sendMessage();
+    }
+
+    function newChat(){
+      currentConvId = null;
+      puterHistory = [];
+      ensurePuterSystemMessage();
+      document.getElementById('messages').innerHTML = '';
+    }
+
+    async function loadConversations(){
+      const r = await fetch('/api/conversations');
+      const convs = await r.json();
+      const box = document.getElementById('conversations');
+      box.innerHTML = '';
+      for(const c of convs){
+        const d = document.createElement('div');
+        d.className = 'item';
+        d.textContent = `${c.title} (${c.message_count})`;
+        d.onclick = async () => {
+          const rr = await fetch(`/api/conversations/${c.id}`);
+          const full = await rr.json();
+          currentConvId = c.id;
+          const m = document.getElementById('messages');
+          m.innerHTML = '';
+          for(const msg of (full.messages || [])) addMessage(msg.role, msg.content);
+          setView('chat');
+        };
+        box.appendChild(d);
+      }
+    }
+
+    async function uploadFile(e){
+      const file = e.target.files[0];
+      if(!file) return;
+      lastUploadedName = file.name;
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch('/api/upload', {method:'POST', body:fd});
+      await loadFiles();
+    }
+
+    async function includeUploadInContext(){
+      if(!lastUploadedName){
+        alert('Sube un archivo primero.');
+        return;
+      }
+      const r = await fetch('/api/file/' + encodeURIComponent(lastUploadedName));
+      const text = await r.text();
+      pushContext('uploads/' + lastUploadedName, text);
+      setView('chat');
+    }
+
+    async function includeSkillsPackInContext(){
+      const dirsRaw = document.getElementById('cfg-skill-dirs')?.value || '';
+      const firstDir = dirsRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '';
+      const url = '/api/local/skills-pack' + (firstDir ? ('?dir=' + encodeURIComponent(firstDir)) : '');
+      const r = await fetch(url);
+      const data = await r.json();
+      if(data.error){
+        alert('No se pudo cargar skills: ' + data.error);
+        return;
+      }
+      pushContext('skills-pack:' + data.skills_count, data.content || '');
+      setView('chat');
+    }
+
+    async function scanLocalRepos(){
+      const root = document.getElementById('scan-root').value.trim();
+      const url = '/api/local/git-repos' + (root ? ('?root=' + encodeURIComponent(root)) : '');
+      const r = await fetch(url);
+      const data = await r.json();
+      const box = document.getElementById('local-repos-list');
+      if(data.error){ box.innerHTML = '<div class="small">'+data.error+'</div>'; return; }
+      box.innerHTML = '';
+      const repos = data.repos || [];
+      if(!repos.length){
+        box.innerHTML = '<div class="small">Sin repos .git en esta ruta</div>';
+        return;
+      }
+      repos.forEach(repo => {
+        const d = document.createElement('div');
+        d.className = 'item';
+        const t = document.createElement('div');
+        t.className = 'small mono';
+        t.textContent = repo.path;
+        d.innerHTML = '<b>📦</b> ';
+        d.appendChild(document.createTextNode(repo.name));
+        d.appendChild(t);
+        d.onclick = () => {
+          document.getElementById('browse-path').value = repo.path;
+          browseLocal();
+          setView('files');
+        };
+        box.appendChild(d);
+      });
+    }
+
+    async function browseLocal(){
+      let p = document.getElementById('browse-path').value.trim();
+      if(!p){
+        const rr = await fetch('/api/local/roots');
+        const j = await rr.json();
+        p = (j.roots && j.roots[0]) || '';
+        document.getElementById('browse-path').value = p;
+      }
+      const r = await fetch('/api/local/browse?path=' + encodeURIComponent(p));
+      const data = await r.json();
+      const box = document.getElementById('browse-list');
+      if(data.error){ box.innerHTML = '<div class="small">'+data.error+'</div>'; return; }
+      document.getElementById('browse-path').value = data.path;
+      box.innerHTML = '';
+      (data.entries || []).forEach(ent => {
+        const d = document.createElement('div');
+        d.className = 'item';
+        if(ent.type === 'dir'){
+          d.innerHTML = '<b>📁</b> ';
+          d.appendChild(document.createTextNode(ent.name));
+          d.onclick = () => { document.getElementById('browse-path').value = ent.path; browseLocal(); };
+        } else {
+          d.innerHTML = '<b>📄</b> ';
+          d.appendChild(document.createTextNode(ent.name));
+          d.onclick = () => openLocalFile(ent.path);
+        }
+        box.appendChild(d);
+      });
+    }
+
+    async function openLocalFile(path){
+      const r = await fetch('/api/local/read?path=' + encodeURIComponent(path));
+      const data = await r.json();
+      lastLocalPreviewPath = path;
+      lastLocalPreviewText = data.content || '';
+      document.getElementById('local-preview-box').textContent = (data.error || data.content || '') +
+        (data.truncated ? '\n\n[truncado]' : '');
+    }
+
+    function includeLocalPreviewInContext(){
+      if(!lastLocalPreviewText){
+        alert('Abre un archivo primero (vista Archivos + Preview).');
+        return;
+      }
+      pushContext(lastLocalPreviewPath || 'local', lastLocalPreviewText);
+      setView('chat');
+    }
+
+    async function loadMyGithubRepos(){
+      const r = await fetch('/api/github/repos');
+      const data = await r.json();
+      const box = document.getElementById('gh-repos-list');
+      if(data.error){ box.innerHTML = '<div class="small">'+data.error+'</div>'; return; }
+      box.innerHTML = '';
+      const repos = data.repos || [];
+      if(!repos.length){
+        box.innerHTML = '<div class="small">Sin repos</div>';
+        return;
+      }
+      repos.forEach(repo => {
+        const fn = repo.full_name;
+        const i = fn.indexOf('/');
+        const o = i < 0 ? fn : fn.slice(0, i);
+        const rep = i < 0 ? '' : fn.slice(i + 1);
+        const d = document.createElement('div');
+        d.className = 'item';
+        d.textContent = repo.full_name + (repo.private ? ' 🔒' : '');
+        d.onclick = async () => {
+          document.getElementById('gh-owner').value = o;
+          document.getElementById('gh-repo').value = rep;
+          document.getElementById('gh-branch').value = repo.default_branch || 'main';
+          await saveGithub();
+          await loadGithubTreeUi();
+        };
+        box.appendChild(d);
+      });
+    }
+
+    async function loadGithubTreeUi(){
+      const r = await fetch('/api/github/tree');
+      const data = await r.json();
+      const out = document.getElementById('gh-output');
+      if(data.error){ out.textContent = data.error; ghTreeFiles = []; document.getElementById('gh-files-list').innerHTML=''; return; }
+      ghTreeFiles = data.files || [];
+      out.textContent = ghTreeFiles.length + ' archivos (máx 500)';
+      filterGhTree();
+    }
+
+    function filterGhTree(){
+      const q = (document.getElementById('gh-tree-filter')?.value || '').toLowerCase();
+      const list = !q ? ghTreeFiles : ghTreeFiles.filter(f => f.toLowerCase().includes(q));
+      const box = document.getElementById('gh-files-list');
+      box.innerHTML = '';
+      list.slice(0, 400).forEach(f => {
+        const d = document.createElement('div');
+        d.className = 'item';
+        d.textContent = f;
+        d.onclick = () => openGhFile(f);
+        box.appendChild(d);
+      });
+    }
+
+    async function openGhFile(path){
+      const r = await fetch('/api/github/file?path=' + encodeURIComponent(path));
+      const data = await r.json();
+      lastGhFilePath = path;
+      lastGhPreviewText = data.content || '';
+      document.getElementById('gh-preview-box').textContent = (data.error || data.content || '') + (data.truncated ? '\n[truncado]' : '');
+    }
+
+    function includeGhPreviewInContext(){
+      if(!lastGhPreviewText){
+        alert('Abre un archivo del árbol primero.');
+        return;
+      }
+      pushContext('github:' + (lastGhFilePath || 'file'), lastGhPreviewText);
+      setView('chat');
+    }
+
+    async function loadFiles(){
+      const r = await fetch('/api/files');
+      const files = await r.json();
+      const list = document.getElementById('files-list');
+      const mini = document.getElementById('files-mini');
+      const html = files.map(f => `<div class="item">${f.name} <span class="small">(${Math.round(f.size/1024)} KB)</span></div>`).join('') || '<div class="small">Sin archivos</div>';
+      list.innerHTML = html;
+      mini.innerHTML = html;
+    }
+
+    async function doSearch(){
+      const query = document.getElementById('web-query').value.trim();
+      if(!query) return;
+      const r = await fetch('/api/web/search', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({query})
+      });
+      const data = await r.json();
+      const box = document.getElementById('web-results');
+      if(data.error){ box.textContent = data.error; return; }
+      box.innerHTML = (data.results || []).map(x => `<div class="item"><a href="${x.url}" target="_blank" style="color:var(--accent)">${x.title}</a><div class="small mono">${x.url}</div></div>`).join('');
+    }
+
+    async function saveGithub(){
+      await fetch('/api/github/connect', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          owner: document.getElementById('gh-owner').value.trim(),
+          repo: document.getElementById('gh-repo').value.trim(),
+          branch: document.getElementById('gh-branch').value.trim() || 'main',
+          token: document.getElementById('gh-token').value.trim()
+        })
+      });
+      document.getElementById('gh-output').textContent = 'GitHub config guardada.';
+    }
+
+    async function checkGithub(){
+      const r = await fetch('/api/github/status');
+      const data = await r.json();
+      document.getElementById('gh-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function runSwarm(){
+      const task = document.getElementById('swarm-task').value.trim();
+      const roles = document.getElementById('swarm-roles').value.split(',').map(x => x.trim()).filter(Boolean);
+      const workspace_path = document.getElementById('swarm-workspace').value.trim();
+      const auto_commit = document.getElementById('swarm-commit').checked;
+      const base_branch = document.getElementById('swarm-base-branch').value.trim() || 'main';
+      const use_worktrees = document.getElementById('swarm-worktrees').checked;
+      const llm_backend = document.getElementById('swarm-llm-backend')?.value || 'ollama';
+      const model = document.getElementById('swarm-model-override')?.value?.trim() || '';
+      const pipeline = document.getElementById('swarm-pipeline')?.checked;
+      if(!task) return;
+      const out = document.getElementById('swarm-output');
+      const modeLabel = pipeline ? 'pipeline' : 'paralelo';
+      out.innerHTML = '<div class="small">Encolando swarm ' + modeLabel + ' (' + llm_backend + ')…</div>';
+      let r;
+      try{
+        const path = pipeline ? '/api/swarm/pipeline' : '/api/swarm/parallel';
+        r = await fetch(api(path), {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({task, roles, workspace_path, auto_commit, base_branch, use_worktrees, llm_backend, model: model || undefined})
+        });
+      }catch(e){
+        out.innerHTML = '<div class="small">Red: ' + (e?.message || e) + '</div>';
+        return;
+      }
+      const text = await r.text();
+      let data;
+      try{
+        data = JSON.parse(text);
+      }catch(_){
+        out.innerHTML = '<div class="small">Respuesta no JSON (HTTP ' + r.status + '). ¿Servidor viejo? Reinicia el builder.\n' + text.slice(0, 400) + '</div>';
+        return;
+      }
+      if(!r.ok || data.error){
+        out.innerHTML = '<div class="small">' + (data.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      if(!data.job_id){
+        out.innerHTML = '<div class="small">Sin job_id en respuesta</div>';
+        return;
+      }
+      out.innerHTML = `<div class="small">Job creado: ${data.job_id} — esperando agentes (${llm_backend})…</div>`;
+      await pollJob(data.job_id);
+    }
+
+    async function pollJob(jobId){
+      const out = document.getElementById('swarm-output');
+      for(let i=0;i<120;i++){
+        const res = await fetchJsonOrExplain(api('/api/jobs/' + encodeURIComponent(jobId)), 'Job');
+        if(!res.ok){
+          out.innerHTML = '<div class="small">' + res.message + '</div>';
+          break;
+        }
+        const job = res.data;
+        if(job.error && !job.status){
+          out.innerHTML = '<div class="small">Error: ' + (typeof job.error === 'string' ? job.error : JSON.stringify(job.error)) + '</div>';
+          break;
+        }
+        const esc = (s) => String(s == null ? '' : s).replace(/</g,'&lt;').replace(/&/g,'&amp;');
+        const errLine = job.status === 'error' && job.error ? `<div class="small" style="color:var(--warn)">Error: ${esc(String(job.error))}</div>` : '';
+        out.innerHTML = `
+          <div class="small">Estado: ${job.status} • Progreso: ${job.progress || '-'}</div>
+          ${errLine}
+          ${(job.outputs || []).map(o => `<div class="panel" style="margin-top:8px"><div class="small">${esc(o.role)} ${o.branch?`• ${esc(o.branch)}`:''} ${o.worktree_path?`• ${esc(o.worktree_path)}`:''}</div><pre>${esc(o.output)}</pre></div>`).join('')}
+        `;
+        if(job.status === 'done' || job.status === 'error') break;
+        await new Promise(res => setTimeout(res, 2000));
+      }
+      await refreshJobs();
+    }
+
+    async function refreshJobs(){
+      const r = await fetch(api('/api/jobs'));
+      const jobs = await r.json();
+      document.getElementById('jobs-output').textContent = JSON.stringify(jobs, null, 2);
+    }
+
+    async function showAgentChanges(){
+      const workspace_path = document.getElementById('swarm-workspace').value.trim();
+      const branch = document.getElementById('agent-branch').value.trim();
+      const base_branch = document.getElementById('agent-base-branch').value.trim() || 'main';
+      if(!branch) return;
+      const r = await fetch('/api/workspace/agent/changes', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({workspace_path, branch, base_branch})
+      });
+      const data = await r.json();
+      document.getElementById('agent-diff-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function mergeAgentBranch(){
+      const workspace_path = document.getElementById('swarm-workspace').value.trim();
+      const branch = document.getElementById('agent-branch').value.trim();
+      const base_branch = document.getElementById('agent-base-branch').value.trim() || 'main';
+      if(!branch) return;
+      const r = await fetch('/api/workspace/agent/merge', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({workspace_path, branch, base_branch, cleanup_worktree: true, delete_branch: false})
+      });
+      const data = await r.json();
+      document.getElementById('agent-diff-output').textContent = JSON.stringify(data, null, 2);
+      await refreshJobs();
+    }
+
+    async function showWorktrees(){
+      const workspace_path = document.getElementById('swarm-workspace').value.trim();
+      const r = await fetch('/api/workspace/worktrees', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({workspace_path})
+      });
+      const data = await r.json();
+      document.getElementById('agent-diff-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function runBrowser(){
+      const url = document.getElementById('browser-url').value.trim();
+      let actions = [];
+      try {
+        actions = JSON.parse(document.getElementById('browser-actions').textContent);
+      } catch(e){
+        document.getElementById('browser-output').textContent = `JSON inválido: ${e.message}`;
+        return;
+      }
+      const r = await fetch('/api/browser/run', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url, actions})
+      });
+      const data = await r.json();
+      document.getElementById('browser-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function gitStatus(){
+      const workspace_path = document.getElementById('ws-path').value.trim();
+      const r = await fetch('/api/workspace/git/status', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({workspace_path})
+      });
+      const data = await r.json();
+      document.getElementById('ws-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function runTests(){
+      const workspace_path = document.getElementById('ws-path').value.trim();
+      const command = document.getElementById('test-cmd').value.trim();
+      const r = await fetch('/api/workspace/tests', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({workspace_path, command})
+      });
+      const data = await r.json();
+      document.getElementById('ws-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function bootstrapRepo(){
+      const workspace_path = document.getElementById('ws-path').value.trim();
+      const r = await fetch('/api/workspace/git/bootstrap', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({workspace_path, branch:'main', message:'chore: bootstrap repository for agent workflow'})
+      });
+      const data = await r.json();
+      document.getElementById('ws-output').textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      try{
+        if(localStorage.getItem('ub_puter_banner') === '1'){
+          const b = document.getElementById('puter-banner');
+          if(b) b.hidden = true;
+        }
+      }catch(_){}
+      renderContextChips();
+      ensurePuterSystemMessage();
+      updateWorkModeChrome();
+      updateChatEngineUI();
+      setView('chat');
+      await loadConfig();
+      await syncStoredKeysToServer();
+      primeOpenRouterDatalist(document.getElementById('openrouter-model-list'));
+      const wsp = document.getElementById('ws-path');
+      if(wsp) wsp.addEventListener('input', updateChatWorkspacePath);
+      updateChatWorkspacePath();
+      refreshPuterAuthStatus().catch(()=>{});
+      window.addEventListener('puter-ready', () => { refreshPuterAuthStatus().catch(()=>{}); });
+      await refreshHealth();
+      await loadConversations();
+      await loadFiles();
+      await refreshJobs();
+      const r = await fetch('/api/local/roots');
+      const jr = await r.json().catch(() => ({}));
+      const sr = document.getElementById('scan-root');
+      if(sr && !sr.value.trim() && jr.roots && jr.roots[0]) sr.value = jr.roots[0];
+      addMessage('assistant', 'Listo. Mientras el asistente responde verás un indicador girando (como ChatGPT). Puter: usa «Iniciar sesión en Puter» si el chat no pide. OpenRouter Groq: claves en Settings + Guardar (y copia en el navegador). Modelos OpenRouter: «Cargar modelos» o desactiva «Solo gratis» si la lista vacía. Terminal rápida = carpeta Workspace.');
+    });
+  </script>
+</body>
+</html>

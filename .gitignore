@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Local secrets & state (never commit)
+builder_config.json
+.env
+.env.*
+*.pem
+
+# Runtime data
+memory/
+uploads/
+.builder_worktrees/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
