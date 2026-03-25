@@ -24,6 +24,25 @@ WORKTREES_DIR = BASE_DIR / ".builder_worktrees"
 CONFIG_PATH = BASE_DIR / "builder_config.json"
 OPENROUTER_MODELS_CACHE_PATH = MEMORY_DIR / "openrouter_models_cache.json"
 OPENROUTER_CACHE_TTL_SEC = 6 * 3600
+GROQ_MODELS_CACHE_PATH = MEMORY_DIR / "groq_models_cache.json"
+GROQ_CACHE_TTL_SEC = 6 * 3600
+
+# IDs permitidos en modo groq_free_only (tier gratuito habitual; ref. console.groq.com/docs/models).
+GROQ_FREE_TIER_MODEL_IDS = frozenset(
+    {
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "llama-3.1-70b-versatile",
+        "llama-3.2-1b-preview",
+        "llama-3.2-3b-preview",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "qwen/qwen3-32b",
+    }
+)
 
 UPLOADS_DIR.mkdir(exist_ok=True)
 MEMORY_DIR.mkdir(exist_ok=True)
@@ -55,6 +74,8 @@ DEFAULT_CONFIG = {
     # Groq OpenAI-compatible API (https://console.groq.com/keys) — también GROQ_API_KEY en el entorno
     "groq_api_key": "",
     "groq_model": "llama-3.3-70b-versatile",
+    # Solo modelos de tier gratuito permitidos (lista blanca; Groq no usa cartera tipo OpenRouter).
+    "groq_free_only": True,
     # OpenRouter (https://openrouter.ai/keys) — OPENROUTER_API_KEY en el entorno
     "openrouter_api_key": "",
     # Solo modelos gratuitos OpenRouter (validado al llamar a la API y al guardar Settings).
@@ -432,6 +453,7 @@ def _groq_chat_completion_nonstream(messages: list, model: str | None = None) ->
     if not key:
         raise ValueError("Groq API key missing: Settings o GROQ_API_KEY")
     mid = (model or "").strip() or CONFIG.get("groq_model") or "llama-3.3-70b-versatile"
+    _enforce_groq_free_tier_model(mid)
     url = "https://api.groq.com/openai/v1/chat/completions"
     payload = {
         "model": mid,
@@ -452,6 +474,7 @@ def _groq_chat_completion_nonstream(messages: list, model: str | None = None) ->
                 msg = str(inner)
         except Exception:
             msg = (r.text or r.reason)[:4000]
+        msg = _groq_error_hint(r.status_code, msg)
         raise ValueError(f"Groq {r.status_code}: {msg}")
     return r.json()
 
@@ -547,6 +570,43 @@ def _groq_api_key() -> str:
     if env:
         return env
     return (CONFIG.get("groq_api_key") or "").strip()
+
+
+def _groq_error_hint(status: int, message: str) -> str:
+    """Texto extra para errores frecuentes de Groq (429 límites, 402 plan)."""
+    base = (message or "").strip()
+    if status == 429:
+        return (
+            base
+            + "\n\n[Groq 429] Límite de velocidad (TPM/RPM). Espera unos minutos o reduce el tamaño del mensaje. "
+            "Tier gratuito: límites en https://console.groq.com/docs/rate-limits"
+        )
+    if status == 402:
+        return (
+            base
+            + "\n\n[Groq 402] Groq no pide «cargar créditos» como OpenRouter para la clave gratuita habitual; "
+            "suele ser plan/límite de facturación o cuenta. Revisa https://console.groq.com/settings/billing y el tier. "
+            "Alternativa: motor Ollama local o OpenRouter con modelo :free."
+        )
+    if status == 403:
+        return base + "\n\n[Groq 403] Clave denegada o sin permiso; revisa https://console.groq.com/keys"
+    return base
+
+
+def _enforce_groq_free_tier_model(model_id: str) -> None:
+    """Lista blanca de modelos de tier gratuito (groq_free_only)."""
+    if not CONFIG.get("groq_free_only", True):
+        return
+    mid = (model_id or "").strip()
+    if not mid:
+        raise ValueError("Modelo Groq vacío.")
+    if mid in GROQ_FREE_TIER_MODEL_IDS:
+        return
+    sample = ", ".join(sorted(GROQ_FREE_TIER_MODEL_IDS)[:6])
+    raise ValueError(
+        f"Modelo «{mid}» no está permitido (solo tier gratuito). Ejemplos: {sample}. "
+        "Desactiva «groq_free_only» en builder_config.json solo si necesitas otro modelo (avanzado)."
+    )
 
 
 def _openrouter_api_key() -> str:
@@ -836,6 +896,8 @@ def health():
             "puter_model": puter_model,
             "groq_configured": bool(gk),
             "groq_model": CONFIG.get("groq_model") or "llama-3.3-70b-versatile",
+            "groq_free_only": CONFIG.get("groq_free_only", True),
+            "groq_no_credit_wallet": True,
             "openrouter_configured": bool(ork),
             "openrouter_model": CONFIG.get("openrouter_model") or "meta-llama/llama-3.2-3b-instruct:free",
             "openrouter_free_only": True,
@@ -900,7 +962,6 @@ def config():
         "system_prompt",
         "chat_engine",
         "puter_model",
-        "groq_model",
         "openrouter_http_referer",
         "openrouter_app_title",
         "openrouter_max_tokens",
@@ -909,6 +970,16 @@ def config():
     ]:
         if key in data:
             CONFIG[key] = data[key]
+    if "groq_free_only" in data:
+        CONFIG["groq_free_only"] = bool(data.get("groq_free_only"))
+    if "groq_model" in data:
+        gm = (data.get("groq_model") or "").strip()
+        if gm:
+            try:
+                _enforce_groq_free_tier_model(gm)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+        CONFIG["groq_model"] = gm
     if "openrouter_model" in data:
         om = (data.get("openrouter_model") or "").strip()
         if om:
@@ -1041,6 +1112,10 @@ def chat_groq_stream():
     key = _groq_api_key()
     if not key:
         return jsonify({"error": "Groq API key missing: set in Settings or export GROQ_API_KEY"}), 400
+    try:
+        _enforce_groq_free_tier_model(model)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     def generate():
         try:
@@ -1069,6 +1144,7 @@ def chat_groq_stream():
                         msg = str(inner or ej)
                 except Exception:
                     msg = (r.text or r.reason)[:4000]
+                msg = _groq_error_hint(r.status_code, msg)
                 yield f"data: {json.dumps({'error': f'Groq {r.status_code}: {msg}'})}\n\n"
                 return
             for line in r.iter_lines():
