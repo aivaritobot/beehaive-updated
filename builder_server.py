@@ -99,6 +99,25 @@ DEFAULT_CONFIG = {
 }
 
 
+def _openrouter_id_policy_free_heuristic(model_id: str) -> bool:
+    """True si el ID cumple la política «solo gratis» por nombre (sin llamar a la API)."""
+    t = (model_id or "").strip().lower()
+    return t == "openrouter/free" or ":free" in t
+
+
+def _openrouter_saved_model_likely_paid_pre_policy(model_id: str) -> bool:
+    """IDs habituales de pago guardados antes de forzar solo :free (migración suave)."""
+    t = (model_id or "").strip()
+    if not t or _openrouter_id_policy_free_heuristic(t):
+        return False
+    low = t.lower()
+    if low.startswith("anthropic/") or low.startswith("moonshotai/"):
+        return True
+    if low.startswith("openai/gpt-4") or low.startswith("openai/gpt-5") or low.startswith("openai/o1") or low.startswith("openai/o3"):
+        return True
+    return False
+
+
 def load_config():
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -110,6 +129,16 @@ def load_config():
     cfg.update(data)
     if "github" not in cfg:
         cfg["github"] = DEFAULT_CONFIG["github"].copy()
+    # Sustituir en disco modelos de pago típicos guardados antes de la política :free (p. ej. Claude en Settings).
+    om = (cfg.get("openrouter_model") or "").strip()
+    migrate = (not om) or _openrouter_saved_model_likely_paid_pre_policy(om)
+    if migrate:
+        cfg["openrouter_model"] = DEFAULT_CONFIG["openrouter_model"]
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
     return cfg
 
 
