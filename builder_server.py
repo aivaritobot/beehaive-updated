@@ -678,7 +678,7 @@ def _openrouter_endpoint(path: str) -> str:
 
 
 def _openrouter_error_hint(status: int, message: str) -> str:
-    """Texto extra cuando OpenRouter devuelve 404/401 frecuentes."""
+    """Texto extra cuando OpenRouter devuelve 404/401/402 frecuentes."""
     base = (message or "").strip()
     if status == 404:
         return (
@@ -688,6 +688,13 @@ def _openrouter_error_hint(status: int, message: str) -> str:
         )
     if status == 401:
         return base + "\n\n[OpenRouter 401] Clave inválida o caducada: Settings → clave sk-or-… → Guardar, o OPENROUTER_API_KEY."
+    if status == 402:
+        return (
+            base
+            + "\n\n[OpenRouter 402] «Insufficient credits» es saldo de cuenta en cero, no el modelo. "
+            "OpenRouter suele exigir créditos en https://openrouter.ai/settings/credits aunque uses modelos :free (precio $0 por token); "
+            "añadir una cantidad mínima suele reactivar la API. Alternativa en este builder: motor Groq o Ollama local (sin OpenRouter)."
+        )
     return base
 
 

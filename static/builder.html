@@ -181,7 +181,7 @@
             </select>
             <input id="openrouter-model" class="input mono" style="padding:8px;font-size:12px" list="openrouter-model-list" placeholder="ID gratuito (…:free) desde la lista" title="Solo modelos gratuitos OpenRouter; el servidor rechaza modelos de pago." onchange="ensurePuterSystemMessage()" oninput="ensurePuterSystemMessage()">
             <datalist id="openrouter-model-list"></datalist>
-            <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:4px" title="El servidor ejecuta herramientas: búsqueda web, shell en Workspace, lectura/escritura y parches sobre el código del builder (auto-reparación). Requiere modelo con tool-calling (Claude, GPT-4, etc.).">
+            <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:4px" title="Solo modelos gratuitos OpenRouter. El servidor ejecuta herramientas (web, shell, editar builder). Elige un :free que soporte tool-calling (p. ej. gpt-oss-20b:free).">
               <input type="checkbox" id="openrouter-agent-toggle" onchange="ensurePuterSystemMessage()">
               <span>Modo agente (web, terminal, <strong>editar este builder</strong>)</span>
             </label>
@@ -383,7 +383,7 @@
           <div class="small" style="margin-bottom:10px;line-height:1.45;color:var(--muted)"><strong>Puter.js</strong> (chat en el navegador, sin API key en el servidor): la librería oficial se carga desde <span class="mono">https://js.puter.com/…</span>. Documentación: <a href="https://developer.puter.com" target="_blank" rel="noopener">developer.puter.com</a> · <a href="https://docs.puter.com" target="_blank" rel="noopener">docs.puter.com</a>. Tras cambiar la URL, <strong>recarga la página</strong> (F5). En Node se usa <span class="mono">init(process.env.puterAuthToken)</span>; en este dashboard el login es por popup en el navegador.</div>
           <label class="small" for="cfg-puter-cdn" style="display:block;margin-bottom:4px">URL del script Puter.js (solo host <span class="mono">js.puter.com</span>, HTTPS)</label>
           <input id="cfg-puter-cdn" class="input mono" style="margin-bottom:12px" value="https://js.puter.com/v2/" placeholder="https://js.puter.com/v2/">
-          <div class="small" style="margin-bottom:8px;color:var(--muted)">Groq: console.groq.com o <span class="mono">GROQ_API_KEY</span>. OpenRouter: solo modelos <strong>gratuitos</strong> (<span class="mono">:free</span> o precio 0); el servidor rechaza modelos de pago. Ollama: swarm y /claude.</div>
+          <div class="small" style="margin-bottom:8px;color:var(--muted)">Groq: console.groq.com o <span class="mono">GROQ_API_KEY</span>. OpenRouter: solo modelos <strong>gratuitos</strong> (<span class="mono">:free</span>); la cuenta debe tener <strong>créditos</strong> en openrouter.ai/settings/credits (si sale 402 «Insufficient credits», aun con :free). Ollama: swarm y /claude.</div>
           <div class="grid2">
             <input id="cfg-groq-key" class="input" type="password" placeholder="Groq API key (gsk_...) o vacío si usas env">
             <input id="cfg-groq-model" class="input" placeholder="Modelo Groq por defecto (ej. llama-3.3-70b-versatile)">
