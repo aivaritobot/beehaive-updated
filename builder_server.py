@@ -508,6 +508,41 @@ def _groq_chat_completion_nonstream(messages: list, model: str | None = None) ->
     return r.json()
 
 
+def _openrouter_post_with_retries(
+    url: str,
+    hdrs: dict,
+    json_body: dict,
+    *,
+    stream: bool,
+    timeout: float | int,
+    max_attempts: int = 4,
+):
+    """
+    POST a chat/completions. Reintenta en 429/503 (frecuente en modelos :free aunque el mensaje sea corto).
+    Respeta Retry-After si viene en cabecera.
+    """
+    last = None
+    for attempt in range(max_attempts):
+        r = requests.post(url, headers=hdrs, json=json_body, stream=stream, timeout=timeout)
+        last = r
+        if r.status_code in (429, 503) and attempt < max_attempts - 1:
+            ra = r.headers.get("Retry-After") or r.headers.get("retry-after")
+            try:
+                delay = float(ra) if ra is not None and str(ra).strip() != "" else None
+            except (TypeError, ValueError):
+                delay = None
+            if delay is None:
+                delay = min(12.0, 1.8 * (2**attempt))
+            try:
+                r.close()
+            except Exception:
+                pass
+            time.sleep(delay)
+            continue
+        return r
+    return last
+
+
 def _openrouter_chat_completion_nonstream(payload: dict, timeout: float | int = 300):
     """POST chat/completions sin stream; devuelve dict JSON o lanza."""
     key = _openrouter_api_key()
@@ -523,7 +558,7 @@ def _openrouter_chat_completion_nonstream(payload: dict, timeout: float | int = 
         "User-Agent": "Uncensored-Builder/1.0 (local; https://openrouter.ai)",
     }
     hdrs.update(_openrouter_extra_headers())
-    r = requests.post(url, headers=hdrs, json=payload, timeout=timeout)
+    r = _openrouter_post_with_retries(url, hdrs, payload, stream=False, timeout=timeout)
     if r.status_code >= 400:
         try:
             ej = r.json()
@@ -787,9 +822,9 @@ def _openrouter_error_hint(status: int, message: str) -> str:
     if status == 429:
         return (
             base
-            + "\n\n[OpenRouter 429] «Provider returned error» suele ser límite de velocidad (tu cuenta o OpenRouter) o el proveedor "
-            "del modelo (Google, Meta, etc.) rechazó la petición temporalmente. Espera 1–5 min; acorta el mensaje o usa «Nueva conversación»; "
-            "prueba otro modelo :free; revisa actividad y límites en https://openrouter.ai/activity ."
+            + "\n\n[OpenRouter 429] Suele ser límite del proveedor o cola de modelos :free (incluso con «hola»). "
+            "Este builder ya reintenta hasta 4 veces con espera; si sigue fallando: espera unos minutos, prueba otro :free, "
+            "o usa Groq/Ollama. Actividad: https://openrouter.ai/activity"
         )
     if status == 503:
         return (
@@ -1246,12 +1281,8 @@ def chat_openrouter_stream():
                 "User-Agent": "Uncensored-Builder/1.0 (local; https://openrouter.ai)",
             }
             hdrs.update(_openrouter_extra_headers())
-            r = requests.post(
-                url,
-                headers=hdrs,
-                json=payload,
-                stream=True,
-                timeout=300,
+            r = _openrouter_post_with_retries(
+                url, hdrs, payload, stream=True, timeout=300, max_attempts=4
             )
             if r.status_code >= 400:
                 try:
