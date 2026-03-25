@@ -767,7 +767,7 @@ def _openrouter_endpoint(path: str) -> str:
 
 
 def _openrouter_error_hint(status: int, message: str) -> str:
-    """Texto extra cuando OpenRouter devuelve 404/401/402 frecuentes."""
+    """Texto extra cuando OpenRouter devuelve 4xx/429 frecuentes."""
     base = (message or "").strip()
     if status == 404:
         return (
@@ -783,6 +783,18 @@ def _openrouter_error_hint(status: int, message: str) -> str:
             + "\n\n[OpenRouter 402] «Insufficient credits» es saldo de cuenta en cero, no el modelo. "
             "OpenRouter suele exigir créditos en https://openrouter.ai/settings/credits aunque uses modelos :free (precio $0 por token); "
             "añadir una cantidad mínima suele reactivar la API. Alternativa en este builder: motor Groq o Ollama local (sin OpenRouter)."
+        )
+    if status == 429:
+        return (
+            base
+            + "\n\n[OpenRouter 429] «Provider returned error» suele ser límite de velocidad (tu cuenta o OpenRouter) o el proveedor "
+            "del modelo (Google, Meta, etc.) rechazó la petición temporalmente. Espera 1–5 min; acorta el mensaje o usa «Nueva conversación»; "
+            "prueba otro modelo :free; revisa actividad y límites en https://openrouter.ai/activity ."
+        )
+    if status == 503:
+        return (
+            base
+            + "\n\n[OpenRouter 503] Proveedor o OpenRouter saturados. Reintenta en unos minutos o cambia de modelo."
         )
     return base
 
