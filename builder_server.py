@@ -57,7 +57,8 @@ DEFAULT_CONFIG = {
     "groq_model": "llama-3.3-70b-versatile",
     # OpenRouter (https://openrouter.ai/keys) — OPENROUTER_API_KEY en el entorno
     "openrouter_api_key": "",
-    "openrouter_model": "moonshotai/kimi-k2.5",
+    # Solo modelos gratuitos OpenRouter (validado al llamar a la API y al guardar Settings).
+    "openrouter_model": "meta-llama/llama-3.2-3b-instruct:free",
     # Opcional: OpenRouter recomienda HTTP-Referer (tu sitio o http://127.0.0.1:7788)
     "openrouter_http_referer": "http://127.0.0.1:7788",
     "openrouter_app_title": "beehAIve UPDATED",
@@ -460,6 +461,9 @@ def _openrouter_chat_completion_nonstream(payload: dict, timeout: float | int = 
     key = _openrouter_api_key()
     if not key:
         raise ValueError("OpenRouter API key missing")
+    mid = (payload.get("model") or "").strip()
+    if mid:
+        _enforce_openrouter_free_model_id(mid)
     url = _openrouter_endpoint("chat/completions")
     hdrs = {
         "Authorization": f"Bearer {key}",
@@ -826,7 +830,8 @@ def health():
             "groq_configured": bool(gk),
             "groq_model": CONFIG.get("groq_model") or "llama-3.3-70b-versatile",
             "openrouter_configured": bool(ork),
-            "openrouter_model": CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5",
+            "openrouter_model": CONFIG.get("openrouter_model") or "meta-llama/llama-3.2-3b-instruct:free",
+            "openrouter_free_only": True,
             "openrouter_api_base": _openrouter_api_base(),
             "puter_cdn_url": _safe_puter_cdn_url(CONFIG.get("puter_cdn_url") or ""),
             "ollama_model": ollama_model,
@@ -889,7 +894,6 @@ def config():
         "chat_engine",
         "puter_model",
         "groq_model",
-        "openrouter_model",
         "openrouter_http_referer",
         "openrouter_app_title",
         "openrouter_max_tokens",
@@ -898,6 +902,14 @@ def config():
     ]:
         if key in data:
             CONFIG[key] = data[key]
+    if "openrouter_model" in data:
+        om = (data.get("openrouter_model") or "").strip()
+        if om:
+            try:
+                _enforce_openrouter_free_model_id(om)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+        CONFIG["openrouter_model"] = om
     if "openrouter_api_base" in data:
         CONFIG["openrouter_api_base"] = _safe_openrouter_api_base(str(data.get("openrouter_api_base") or ""))
     # Solo actualizar claves si vienen con valor (no borrar al guardar con campo vacío).
@@ -1085,10 +1097,14 @@ def chat_openrouter_stream():
     if not raw_messages or not isinstance(raw_messages, list):
         return jsonify({"error": "messages (array) required"}), 400
     raw_messages = _clamp_chat_messages(raw_messages, _CLOUD_OPENROUTER_HISTORY_MAX_CHARS)
-    model = (data.get("model") or "").strip() or CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5"
+    model = (data.get("model") or "").strip() or CONFIG.get("openrouter_model") or "meta-llama/llama-3.2-3b-instruct:free"
     key = _openrouter_api_key()
     if not key:
         return jsonify({"error": "OpenRouter API key missing: Settings o export OPENROUTER_API_KEY"}), 400
+    try:
+        _enforce_openrouter_free_model_id(model)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     def generate():
         try:
@@ -1167,10 +1183,14 @@ def chat_openrouter_agent():
     if not raw_messages or not isinstance(raw_messages, list):
         return jsonify({"error": "messages (array) required"}), 400
     raw_messages = _clamp_chat_messages(raw_messages, _CLOUD_OPENROUTER_HISTORY_MAX_CHARS)
-    model = (data.get("model") or "").strip() or CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5"
+    model = (data.get("model") or "").strip() or CONFIG.get("openrouter_model") or "meta-llama/llama-3.2-3b-instruct:free"
     workspace_path = (data.get("workspace_path") or "").strip()
     if not _openrouter_api_key():
         return jsonify({"error": "OpenRouter API key missing: Settings o export OPENROUTER_API_KEY"}), 400
+    try:
+        _enforce_openrouter_free_model_id(model)
+    except ValueError as e:
+        return jsonify({"error": str(e), "steps": []}), 400
 
     messages = list(raw_messages)
     wp_note = (
@@ -1449,6 +1469,48 @@ def _openrouter_fetch_models_raw():
     if not isinstance(models, list):
         return None, "Respuesta sin lista data/models"
     return models, None
+
+
+def _openrouter_models_catalog() -> list:
+    """Catálogo para validar precio: caché (sin caducar si hace falta) o red."""
+    raw = _openrouter_cache_read(ignore_ttl=True)
+    if isinstance(raw, list) and raw:
+        return raw
+    models, _err = _openrouter_fetch_models_raw()
+    if isinstance(models, list) and models:
+        try:
+            _openrouter_cache_write(models)
+        except Exception:
+            pass
+        return models
+    return []
+
+
+def _enforce_openrouter_free_model_id(model_id: str) -> None:
+    """
+    Solo modelos gratuitos en OpenRouter: :free, openrouter/free, o precio prompt+completion = 0 en el catálogo.
+    Si el ID no está en caché/red, solo se acepta si el nombre contiene :free (convención OpenRouter).
+    """
+    mid = (model_id or "").strip()
+    if not mid:
+        raise ValueError("Modelo OpenRouter vacío.")
+    models = _openrouter_models_catalog()
+    for m in models:
+        if not isinstance(m, dict) or m.get("id") != mid:
+            continue
+        if _is_free_openrouter_model(m):
+            return
+        raise ValueError(
+            f"El modelo «{mid}» tiene coste en OpenRouter. Solo se permiten modelos gratuitos; "
+            "elige uno con :free o precio 0 en la lista (solo gratis)."
+        )
+    mlow = mid.lower()
+    if mlow == "openrouter/free" or ":free" in mlow:
+        return
+    raise ValueError(
+        f"Modelo «{mid}» no está en el catálogo local o no es claramente gratuito. "
+        "Abre la lista de modelos con «solo gratis», elige un ID, o usa un modelo que termine en :free."
+    )
 
 
 @app.route("/api/openrouter/models", methods=["GET"])
@@ -1768,7 +1830,7 @@ def run_role_agent(role, task, context, llm_backend=None, model=None):
 
     try:
         if backend == "openrouter":
-            mid = (model or "").strip() or CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5"
+            mid = (model or "").strip() or CONFIG.get("openrouter_model") or "meta-llama/llama-3.2-3b-instruct:free"
             data = _openrouter_chat_completion_nonstream(
                 {
                     "model": mid,
@@ -2539,7 +2601,7 @@ if __name__ == "__main__":
     pm = CONFIG.get("puter_model") or "?"
     om = CONFIG["model"]
     gm = CONFIG.get("groq_model") or "llama-3.3-70b-versatile"
-    orm = CONFIG.get("openrouter_model") or "moonshotai/kimi-k2.5"
+    orm = CONFIG.get("openrouter_model") or "meta-llama/llama-3.2-3b-instruct:free"
     if ce == "puter":
         chat_line = f"chat Puter ({pm})"
     elif ce == "groq":

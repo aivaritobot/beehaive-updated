@@ -170,16 +170,16 @@
             <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
               <button type="button" class="btn secondary small" onclick="loadOpenRouterModelList(false)">Cargar modelos</button>
               <button type="button" class="btn secondary small" onclick="loadOpenRouterModelList(true)" title="Ignora caché local y vuelve a pedir la lista a OpenRouter">Forzar red</button>
-              <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap" title="Solo variantes :free, openrouter/free o precio 0 en la API">
-                <input type="checkbox" id="openrouter-free-only" onchange="loadOpenRouterModelList(false)">
+              <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap" title="El servidor solo acepta modelos gratuitos; esta lista filtra :free / precio 0.">
+                <input type="checkbox" id="openrouter-free-only" checked onchange="loadOpenRouterModelList(false)">
                 <span>Solo gratis</span>
               </label>
             </div>
-            <div class="small" style="color:var(--muted);line-height:1.4">Requiere clave en Settings + Guardar. Si la lista sale vacía: <strong>desactiva «Solo gratis»</strong> o usa el datalist / ID manual. «Probar OpenRouter» en Settings valida la clave.</div>
+            <div class="small" style="color:var(--muted);line-height:1.4">Requiere clave en Settings + Guardar. <strong>OpenRouter</strong>: solo IDs gratuitos (p. ej. terminados en <span class="mono">:free</span>); los de pago el servidor los rechaza. Si la lista sale vacía: <strong>Forzar red</strong> o <strong>Probar OpenRouter</strong> en Settings.</div>
             <select id="openrouter-model-pick" class="input mono" style="font-size:11px;max-height:140px" title="Lista desde la API (requiere clave guardada)" onchange="onOpenRouterPick()">
               <option value="">— Cargando lista o pulsa «Cargar modelos» —</option>
             </select>
-            <input id="openrouter-model" class="input mono" style="padding:8px;font-size:12px" list="openrouter-model-list" placeholder="ID (ej. moonshotai/kimi-k2.5, Venice o Claude en la lista)" title="Puedes pegar cualquier ID de openrouter.ai/models" onchange="ensurePuterSystemMessage()" oninput="ensurePuterSystemMessage()">
+            <input id="openrouter-model" class="input mono" style="padding:8px;font-size:12px" list="openrouter-model-list" placeholder="ID gratuito (…:free) desde la lista" title="Solo modelos gratuitos OpenRouter; el servidor rechaza modelos de pago." onchange="ensurePuterSystemMessage()" oninput="ensurePuterSystemMessage()">
             <datalist id="openrouter-model-list"></datalist>
             <label class="small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:4px" title="El servidor ejecuta herramientas: búsqueda web, shell en Workspace, lectura/escritura y parches sobre el código del builder (auto-reparación). Requiere modelo con tool-calling (Claude, GPT-4, etc.).">
               <input type="checkbox" id="openrouter-agent-toggle" onchange="ensurePuterSystemMessage()">
@@ -383,12 +383,12 @@
           <div class="small" style="margin-bottom:10px;line-height:1.45;color:var(--muted)"><strong>Puter.js</strong> (chat en el navegador, sin API key en el servidor): la librería oficial se carga desde <span class="mono">https://js.puter.com/…</span>. Documentación: <a href="https://developer.puter.com" target="_blank" rel="noopener">developer.puter.com</a> · <a href="https://docs.puter.com" target="_blank" rel="noopener">docs.puter.com</a>. Tras cambiar la URL, <strong>recarga la página</strong> (F5). En Node se usa <span class="mono">init(process.env.puterAuthToken)</span>; en este dashboard el login es por popup en el navegador.</div>
           <label class="small" for="cfg-puter-cdn" style="display:block;margin-bottom:4px">URL del script Puter.js (solo host <span class="mono">js.puter.com</span>, HTTPS)</label>
           <input id="cfg-puter-cdn" class="input mono" style="margin-bottom:12px" value="https://js.puter.com/v2/" placeholder="https://js.puter.com/v2/">
-          <div class="small" style="margin-bottom:8px;color:var(--muted)">Groq: console.groq.com o <span class="mono">GROQ_API_KEY</span>. OpenRouter: openrouter.ai/keys o <span class="mono">OPENROUTER_API_KEY</span> — modelo = ID en openrouter.ai/models. Ollama: swarm y /claude.</div>
+          <div class="small" style="margin-bottom:8px;color:var(--muted)">Groq: console.groq.com o <span class="mono">GROQ_API_KEY</span>. OpenRouter: solo modelos <strong>gratuitos</strong> (<span class="mono">:free</span> o precio 0); el servidor rechaza modelos de pago. Ollama: swarm y /claude.</div>
           <div class="grid2">
             <input id="cfg-groq-key" class="input" type="password" placeholder="Groq API key (gsk_...) o vacío si usas env">
             <input id="cfg-groq-model" class="input" placeholder="Modelo Groq por defecto (ej. llama-3.3-70b-versatile)">
             <input id="cfg-openrouter-key" class="input" type="password" placeholder="OpenRouter key (sk-or-...) o vacío si usas env">
-            <input id="cfg-openrouter-model" class="input" placeholder="Modelo OpenRouter por defecto (ej. moonshotai/kimi-k2.5)">
+            <input id="cfg-openrouter-model" class="input" placeholder="Modelo OpenRouter gratuito (ej. …:free)">
             <input id="cfg-openrouter-referer" class="input mono" placeholder="Referer opcional (ej. http://127.0.0.1:7788)">
             <input id="cfg-openrouter-api-base" class="input mono" placeholder="Base API OpenRouter (vacío = https://openrouter.ai/api/v1; no pegues …/chat/completions/)">
             <input id="cfg-openrouter-title" class="input" placeholder="Nombre app OpenRouter (opcional)">
@@ -469,9 +469,9 @@
     let puterHistory = [];
     let chatAbortController = null;
     let chatStopRequested = false;
-    const DEFAULT_OPENROUTER_MODEL = 'moonshotai/kimi-k2.5';
+    const DEFAULT_OPENROUTER_MODEL = 'meta-llama/llama-3.2-3b-instruct:free';
     /** Modelo OpenRouter recomendado para herramientas (builder_read, search_replace, workspace_run). */
-    const REPAIR_BUILDER_AGENT_MODEL = 'anthropic/claude-3.5-sonnet';
+    const REPAIR_BUILDER_AGENT_MODEL = 'openai/gpt-oss-20b:free';
     const UB_KEY_STORAGE = 'ub_api_keys_backup_v1';
 
     const builderPersistenceRules = [
@@ -738,12 +738,11 @@
     function primeOpenRouterDatalist(dl){
       if(!dl) return;
       const presets = [
-        ['cognitivecomputations/dolphin-mistral-24b-venice-edition:free', 'Venice (gratis)'],
+        ['meta-llama/llama-3.2-3b-instruct:free', 'Llama 3.2 3B :free'],
+        ['openai/gpt-oss-20b:free', 'GPT-OSS 20B :free'],
+        ['cognitivecomputations/dolphin-mistral-24b-venice-edition:free', 'Venice Dolphin :free'],
         ['venice/uncensored:free', 'Venice uncensored :free'],
-        ['anthropic/claude-3.5-sonnet', 'Claude 3.5 Sonnet'],
-        ['anthropic/claude-3.7-sonnet:thinking', 'Claude 3.7 Sonnet'],
-        ['moonshotai/kimi-k2.5', 'Kimi K2.5'],
-        ['openai/gpt-4o', 'GPT-4o']
+        ['google/gemma-2-9b-it:free', 'Gemma 2 9B :free']
       ];
       dl.innerHTML = '';
       for(const [id, label] of presets){
